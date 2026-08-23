@@ -620,10 +620,16 @@ async function syncMemberRankRole(member, rank) {
     .map((roleId) => member.guild.roles.cache.get(roleId))
     .filter(Boolean);
   const currentRankRoles = configuredRoles.filter((role) => member.roles.cache.has(role.id));
-  const targetRoles = rankRoleIdsFor(rank)
+  // When a rank lists multiple roles (e.g. rank 8: High Staff + Administrator), only the first
+  // one is ever auto-assigned here. The rest are manual-only markers — an admin grants them by
+  // hand and they still count toward that rank, but the bot never adds them on its own. All of
+  // them are still removed automatically once the member leaves that rank.
+  const targetRoleIds = rankRoleIdsFor(rank);
+  const targetRoles = targetRoleIds
     .map((roleId) => member.guild.roles.cache.get(roleId))
     .filter(Boolean);
   if (!targetRoles.length) throw new Error(`Роль для ${rank} ранга не найдена на Discord-сервере.`);
+  const primaryTargetRole = member.guild.roles.cache.get(targetRoleIds[0]);
   const unmanageableRole = [...new Set([...currentRankRoles, ...targetRoles])]
     .find((role) => !role.editable);
   if (unmanageableRole) {
@@ -631,12 +637,12 @@ async function syncMemberRankRole(member, rank) {
   }
   botRankChanges.set(member.id, Date.now() + 15_000);
 
-  const targetRoleIds = new Set(targetRoles.map((role) => role.id));
-  for (const role of targetRoles) {
-    if (!member.roles.cache.has(role.id)) await member.roles.add(role);
+  const targetRoleIdSet = new Set(targetRoles.map((role) => role.id));
+  if (primaryTargetRole && !member.roles.cache.has(primaryTargetRole.id)) {
+    await member.roles.add(primaryTargetRole);
   }
   for (const role of currentRankRoles) {
-    if (!targetRoleIds.has(role.id)) await member.roles.remove(role.id);
+    if (!targetRoleIdSet.has(role.id)) await member.roles.remove(role.id);
   }
 }
 
