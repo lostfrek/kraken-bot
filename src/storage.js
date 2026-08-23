@@ -82,7 +82,16 @@ async function initStorage() {
   const required = ["MYSQL_HOST", "MYSQL_USER", "MYSQL_PASSWORD", "MYSQL_DBNAME"];
   const missing = required.filter((name) => !process.env[name]);
   if (missing.length) throw new Error(`Не заданы переменные MySQL: ${missing.join(", ")}`);
-  if (!fs.existsSync(CERT_PATH)) throw new Error("Не найден TLS-сертификат ca_mysql.crt");
+
+  // TLS is required and pinned to a specific CA (e.g. the Timeweb Cloud MySQL cert) only when
+  // MYSQL_SSL_CA_PATH is explicitly set. Providers reachable only over a private/internal network
+  // (e.g. Railway's <service>.railway.internal) neither offer nor need that — leave it unset there.
+  const sslCaPath = process.env.MYSQL_SSL_CA_PATH
+    ? path.resolve(ROOT, process.env.MYSQL_SSL_CA_PATH)
+    : null;
+  if (sslCaPath && !fs.existsSync(sslCaPath)) {
+    throw new Error(`Не найден TLS-сертификат: ${sslCaPath}`);
+  }
 
   const poolOptions = {
       host: process.env.MYSQL_HOST,
@@ -94,10 +103,9 @@ async function initStorage() {
       waitForConnections: true,
       connectionLimit: 5,
       connectTimeout: 15000,
-      ssl: {
-        ca: fs.readFileSync(CERT_PATH, "utf8"),
-        rejectUnauthorized: true
-      }
+      ...(sslCaPath
+        ? { ssl: { ca: fs.readFileSync(sslCaPath, "utf8"), rejectUnauthorized: true } }
+        : {})
     };
   const retryDelays = [0, 2000, 5000, 10000, 20000];
   let tls;
@@ -119,10 +127,10 @@ async function initStorage() {
     }
   }
   if (lastError) throw lastError;
-  if (!tls?.Value) throw new Error("MySQL-соединение установлено без TLS");
+  if (sslCaPath && !tls?.Value) throw new Error("MySQL-соединение установлено без TLS");
   resetState();
   await loadState();
-  console.log(`MySQL storage connected with TLS (${tls.Value}).`);
+  console.log(tls?.Value ? `MySQL storage connected with TLS (${tls.Value}).` : "MySQL storage connected (private network, no TLS).");
 }
 
 function resetState() {
