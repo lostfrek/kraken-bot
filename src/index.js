@@ -3617,7 +3617,7 @@ async function handleInteraction(interaction) {
     await thread.send({
       embeds: [new EmbedBuilder()
         .setColor(0x79040c)
-        .setTitle("Новый откат CAPT")
+        .setTitle("Новый откат!")
         .setDescription(`Отправитель: <@${interaction.user.id}>\nСсылка: ${rawUrl}`)
         .setFooter({ text: interaction.user.id })
         .setTimestamp()],
