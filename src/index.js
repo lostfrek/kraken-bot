@@ -1753,7 +1753,6 @@ function buildCaptReplayPanel(window) {
   const expiresAt = captReplayWindowExpiresAt(window);
   const embed = new EmbedBuilder()
     .setColor(0x79040c)
-    .setTitle("Загрузка откатов CAPT")
     .setDescription(
       "### Как это работает\n" +
       "• Приём откатов открывается на **90 минут**.\n" +
