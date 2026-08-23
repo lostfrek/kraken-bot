@@ -3573,16 +3573,12 @@ async function handleInteraction(interaction) {
   }
 
   if (interaction.isButton() && interaction.customId === "capt_replay:upload") {
+    // Deliberately no network calls before showModal() - it must be the very
+    // first response to the interaction, within Discord's 3-second window.
+    // The one-per-window check happens on modal submit instead.
     const window = getCaptReplayWindow();
     if (!isCaptReplayWindowOpen(window)) {
       await interaction.reply({ content: noticeMessage("Приём откатов сейчас закрыт."), flags: MessageFlags.Ephemeral });
-      return;
-    }
-    const thread = window.threadId
-      ? await interaction.guild.channels.fetch(window.threadId).catch(() => null)
-      : null;
-    if (await hasSubmittedCaptReplay(thread, interaction.user.id)) {
-      await interaction.reply({ content: noticeMessage("Вы уже отправили откат в этом открытии. Дождитесь следующего."), flags: MessageFlags.Ephemeral });
       return;
     }
     await interaction.showModal(buildCaptReplayModal());
@@ -3601,18 +3597,20 @@ async function handleInteraction(interaction) {
       await interaction.reply({ content: errorMessage("Укажите корректную ссылку на YouTube."), flags: MessageFlags.Ephemeral });
       return;
     }
+    // Defer before any network calls - modal submits get the same 3-second window as any
+    // other interaction, and the checks below each cost a Discord API round trip.
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     const thread = window.threadId
       ? await interaction.guild.channels.fetch(window.threadId).catch(() => null)
       : null;
     if (!thread?.isThread()) {
-      await interaction.reply({ content: errorMessage("Не удалось найти ветку для откатов. Обратитесь к руководству."), flags: MessageFlags.Ephemeral });
+      await interaction.editReply({ content: errorMessage("Не удалось найти ветку для откатов. Обратитесь к руководству.") });
       return;
     }
     if (await hasSubmittedCaptReplay(thread, interaction.user.id)) {
-      await interaction.reply({ content: noticeMessage("Вы уже отправили откат в этом открытии. Дождитесь следующего."), flags: MessageFlags.Ephemeral });
+      await interaction.editReply({ content: noticeMessage("Вы уже отправили откат в этом открытии. Дождитесь следующего.") });
       return;
     }
-    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     await thread.send({
       embeds: [new EmbedBuilder()
         .setColor(0x79040c)
