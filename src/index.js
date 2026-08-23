@@ -2108,9 +2108,12 @@ async function openCaptReplayWindow(guild, adminId) {
   );
   let threadId = null;
   if (panelMessage) {
-    const thread = await panelMessage.startThread({
+    // A standalone thread (not attached to the panel message) so a new one can be created
+    // every time the window opens - a message can only ever have one thread created from it.
+    const thread = await panelMessage.channel.threads.create({
       name: `Откаты CAPT — ${new Date(openedAt).toLocaleDateString("ru-RU")}`,
       autoArchiveDuration: 1440,
+      type: ChannelType.PublicThread,
       reason: `Приём откатов открыт: ${adminId}`
     }).catch((error) => {
       console.error("Failed to create capt replay thread:", error);
