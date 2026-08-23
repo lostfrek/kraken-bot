@@ -1755,9 +1755,20 @@ function buildCaptReplayPanel(window) {
     .setColor(0x79040c)
     .setTitle("Загрузка откатов CAPT")
     .setDescription(
-      open
-        ? `Приём откатов открыт до ${discordTimestampFromMs(expiresAt)}. Нажмите «Загрузить откат» и пришлите ссылку на YouTube с записью.`
-        : "Приём откатов сейчас закрыт. Дождитесь, пока руководство откроет приём."
+      "Откат — это запись прохождения испытания на Арене, которую нужно прислать " +
+      "для рассмотрения заявки в CAPT-состав.\n\n" +
+      "### Как это работает\n" +
+      "• Руководство открывает приём откатов командой `/capts` на **1 час 30 минут**.\n" +
+      "• Пока приём открыт, кнопка «Загрузить откат» ниже активна — нажмите её и пришлите ссылку.\n" +
+      "• Ссылка должна вести на **YouTube** (youtube.com или youtu.be), другие сайты не принимаются.\n" +
+      "• За одно открытие каждый участник может отправить **только один откат** — повторная " +
+      "отправка в это же окно будет отклонена.\n\n" +
+      "### После отправки\n" +
+      "Бот создаёт под этим сообщением отдельную ветку и публикует туда каждый присланный " +
+      "откат — так руководству удобно рассматривать их все в одном месте.\n\n" +
+      (open
+        ? `**Приём открыт до ${discordTimestampFromMs(expiresAt)}.**`
+        : "**Приём сейчас закрыт.** Дождитесь, пока руководство его откроет.")
     );
   const row = new ActionRowBuilder().addComponents(
     new ButtonBuilder()
@@ -1767,6 +1778,13 @@ function buildCaptReplayPanel(window) {
       .setDisabled(!open)
   );
   return { content: null, embeds: [embed], components: [row] };
+}
+
+async function hasSubmittedCaptReplay(thread, userId) {
+  if (!thread) return false;
+  const messages = await thread.messages.fetch({ limit: 100 }).catch(() => null);
+  if (!messages) return false;
+  return messages.some((message) => message.embeds[0]?.footer?.text === userId);
 }
 
 function buildCaptReplayModal() {
@@ -2081,21 +2099,58 @@ async function processExpiredGameAfkSessions(clientInstance) {
   }
 }
 
-async function processCaptReplayExpiry(clientInstance) {
-  const window = getCaptReplayWindow();
-  if (!window.isOpen) return;
-  const expiresAt = captReplayWindowExpiresAt(window);
-  if (expiresAt === null || Date.now() < expiresAt) return;
+async function openCaptReplayWindow(guild, adminId) {
+  const openedAt = new Date().toISOString();
+  await saveCaptReplayWindow({ isOpen: true, openedAt, openedBy: adminId, threadId: null });
+  const panelMessage = await refreshStaticPanel(
+    guild,
+    CAPT_REPLAY_CHANNEL_ID,
+    "capt_replay:upload",
+    () => buildCaptReplayPanel(getCaptReplayWindow())
+  );
+  let threadId = null;
+  if (panelMessage) {
+    const thread = await panelMessage.startThread({
+      name: `Откаты CAPT — ${new Date(openedAt).toLocaleDateString("ru-RU")}`,
+      autoArchiveDuration: 1440,
+      reason: `Приём откатов открыт: ${adminId}`
+    }).catch((error) => {
+      console.error("Failed to create capt replay thread:", error);
+      return null;
+    });
+    threadId = thread?.id ?? null;
+  }
+  const finalWindow = { isOpen: true, openedAt, openedBy: adminId, threadId };
+  await saveCaptReplayWindow(finalWindow);
+  return finalWindow;
+}
 
+async function closeCaptReplayWindow(guild, window) {
+  if (window.threadId) {
+    const thread = await guild.channels.fetch(window.threadId).catch(() => null);
+    if (thread?.isThread() && !thread.archived) {
+      await thread.setLocked(true, "Приём откатов закрыт").catch(() => null);
+      await thread.setArchived(true, "Приём откатов закрыт").catch(() => null);
+    }
+  }
   await saveCaptReplayWindow({ ...window, isOpen: false });
-  const guild = await clientInstance.guilds.fetch(process.env.DISCORD_GUILD_ID).catch(() => null);
-  if (!guild) return;
   await refreshStaticPanel(
     guild,
     CAPT_REPLAY_CHANNEL_ID,
     "capt_replay:upload",
     () => buildCaptReplayPanel(getCaptReplayWindow())
   );
+}
+
+async function processCaptReplayExpiry(clientInstance) {
+  const window = getCaptReplayWindow();
+  if (!window.isOpen) return;
+  const expiresAt = captReplayWindowExpiresAt(window);
+  if (expiresAt === null || Date.now() < expiresAt) return;
+
+  const guild = await clientInstance.guilds.fetch(process.env.DISCORD_GUILD_ID).catch(() => null);
+  if (!guild) return;
+  await closeCaptReplayWindow(guild, window);
   await sendLog(guild, new EmbedBuilder()
     .setColor(0xf2c94c)
     .setTitle("Приём откатов CAPT закрыт автоматически")
@@ -3130,31 +3185,34 @@ async function handleInteraction(interaction) {
     if (commandName === "capts") {
       const window = getCaptReplayWindow();
       const nextOpen = !isCaptReplayWindowOpen(window);
-      const nextWindow = {
-        isOpen: nextOpen,
-        openedAt: nextOpen ? new Date().toISOString() : window.openedAt,
-        openedBy: nextOpen ? interaction.user.id : window.openedBy
-      };
       await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-      await saveCaptReplayWindow(nextWindow);
-      await refreshStaticPanel(
-        interaction.guild,
-        CAPT_REPLAY_CHANNEL_ID,
-        "capt_replay:upload",
-        () => buildCaptReplayPanel(getCaptReplayWindow())
-      );
-      const expiresAt = captReplayWindowExpiresAt(nextWindow);
+
+      if (!nextOpen) {
+        await closeCaptReplayWindow(interaction.guild, window);
+        await sendLog(
+          interaction.guild,
+          new EmbedBuilder()
+            .setColor(0xeb5757)
+            .setTitle("Приём откатов CAPT закрыт")
+            .setDescription(`<@${interaction.user.id}> закрыл приём откатов.`)
+        );
+        await interaction.editReply({ content: successMessage("Приём откатов закрыт.") });
+        return;
+      }
+
+      const finalWindow = await openCaptReplayWindow(interaction.guild, interaction.user.id);
+      const expiresAt = captReplayWindowExpiresAt(finalWindow);
       await sendLog(
         interaction.guild,
         new EmbedBuilder()
-          .setColor(nextOpen ? 0x27ae60 : 0xeb5757)
-          .setTitle(`Приём откатов CAPT ${nextOpen ? "открыт" : "закрыт"}`)
-          .setDescription(`<@${interaction.user.id}> ${nextOpen ? "открыл" : "закрыл"} приём откатов.`)
+          .setColor(0x27ae60)
+          .setTitle("Приём откатов CAPT открыт")
+          .setDescription(`<@${interaction.user.id}> открыл приём откатов.`)
       );
       await interaction.editReply({
-        content: nextOpen
+        content: finalWindow.threadId
           ? successMessage(`Приём откатов открыт до ${discordTimestampFromMs(expiresAt)}.`)
-          : successMessage("Приём откатов закрыт.")
+          : noticeMessage("Приём открыт, но не удалось создать ветку для откатов — проверьте права бота в канале.")
       });
       return;
     }
@@ -3518,6 +3576,13 @@ async function handleInteraction(interaction) {
       await interaction.reply({ content: noticeMessage("Приём откатов сейчас закрыт."), flags: MessageFlags.Ephemeral });
       return;
     }
+    const thread = window.threadId
+      ? await interaction.guild.channels.fetch(window.threadId).catch(() => null)
+      : null;
+    if (await hasSubmittedCaptReplay(thread, interaction.user.id)) {
+      await interaction.reply({ content: noticeMessage("Вы уже отправили откат в этом открытии. Дождитесь следующего."), flags: MessageFlags.Ephemeral });
+      return;
+    }
     await interaction.showModal(buildCaptReplayModal());
     return;
   }
@@ -3534,18 +3599,27 @@ async function handleInteraction(interaction) {
       await interaction.reply({ content: errorMessage("Укажите корректную ссылку на YouTube."), flags: MessageFlags.Ephemeral });
       return;
     }
-    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-    const channel = await interaction.guild.channels.fetch(CAPT_REPLAY_CHANNEL_ID).catch(() => null);
-    if (channel?.isTextBased()) {
-      await channel.send({
-        embeds: [new EmbedBuilder()
-          .setColor(0x79040c)
-          .setTitle("Новый откат CAPT")
-          .setDescription(`Отправитель: <@${interaction.user.id}>\nСсылка: ${rawUrl}`)
-          .setTimestamp()],
-        allowedMentions: { parse: [], users: [], roles: [] }
-      }).catch(() => null);
+    const thread = window.threadId
+      ? await interaction.guild.channels.fetch(window.threadId).catch(() => null)
+      : null;
+    if (!thread?.isThread()) {
+      await interaction.reply({ content: errorMessage("Не удалось найти ветку для откатов. Обратитесь к руководству."), flags: MessageFlags.Ephemeral });
+      return;
     }
+    if (await hasSubmittedCaptReplay(thread, interaction.user.id)) {
+      await interaction.reply({ content: noticeMessage("Вы уже отправили откат в этом открытии. Дождитесь следующего."), flags: MessageFlags.Ephemeral });
+      return;
+    }
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    await thread.send({
+      embeds: [new EmbedBuilder()
+        .setColor(0x79040c)
+        .setTitle("Новый откат CAPT")
+        .setDescription(`Отправитель: <@${interaction.user.id}>\nСсылка: ${rawUrl}`)
+        .setFooter({ text: interaction.user.id })
+        .setTimestamp()],
+      allowedMentions: { parse: [], users: [], roles: [] }
+    }).catch(() => null);
     await interaction.editReply({ content: successMessage("Откат отправлен!") });
     return;
   }

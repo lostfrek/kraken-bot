@@ -8,7 +8,7 @@ const CERT_PATH = path.join(ROOT, "ca_mysql.crt");
 const state = {
   applications: {},
   botInfo: {},
-  captReplayWindow: { isOpen: false, openedAt: null, openedBy: null },
+  captReplayWindow: { isOpen: false, openedAt: null, openedBy: null, threadId: null },
   mpPoints: {},
   mpRequests: {},
   ranks: {},
@@ -137,7 +137,7 @@ async function initStorage() {
 function resetState() {
   state.applications = {};
   state.botInfo = {};
-  state.captReplayWindow = { isOpen: false, openedAt: null, openedBy: null };
+  state.captReplayWindow = { isOpen: false, openedAt: null, openedBy: null, threadId: null };
   state.mpPoints = {};
   state.mpRequests = {};
   state.ranks = {};
@@ -170,12 +170,13 @@ async function loadState() {
   };
 
   const [captReplayRows] = await pool.query(
-    "SELECT is_open, opened_at, opened_by FROM capt_replay_window WHERE id = 1"
+    "SELECT is_open, opened_at, opened_by, thread_id FROM capt_replay_window WHERE id = 1"
   );
   state.captReplayWindow = {
     isOpen: Boolean(captReplayRows[0]?.is_open),
     openedAt: isoDate(captReplayRows[0]?.opened_at),
-    openedBy: captReplayRows[0]?.opened_by ?? null
+    openedBy: captReplayRows[0]?.opened_by ?? null,
+    threadId: captReplayRows[0]?.thread_id ?? null
   };
 
   const [users] = await pool.query("SELECT * FROM users");
@@ -453,14 +454,15 @@ function saveCaptReplayWindow(window) {
   state.captReplayWindow = window;
   return queueWrite("capt replay window", async () => {
     await pool.execute(
-      `INSERT INTO capt_replay_window (id, is_open, opened_at, opened_by, updated_at)
-       VALUES (1, ?, ?, ?, CURRENT_TIMESTAMP(3))
+      `INSERT INTO capt_replay_window (id, is_open, opened_at, opened_by, thread_id, updated_at)
+       VALUES (1, ?, ?, ?, ?, CURRENT_TIMESTAMP(3))
        ON DUPLICATE KEY UPDATE
          is_open = VALUES(is_open),
          opened_at = VALUES(opened_at),
          opened_by = VALUES(opened_by),
+         thread_id = VALUES(thread_id),
          updated_at = CURRENT_TIMESTAMP(3)`,
-      [Boolean(window.isOpen), mysqlDate(window.openedAt), window.openedBy ?? null]
+      [Boolean(window.isOpen), mysqlDate(window.openedAt), window.openedBy ?? null, window.threadId ?? null]
     );
   });
 }
