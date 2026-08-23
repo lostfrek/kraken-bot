@@ -236,6 +236,7 @@ const SUPPORT_REQUEST_TYPES = {
 const MAJESTIC_ONLINE_API_URL = "https://wiki.majestic-rp.ru/api/online";
 const BOT_STATUS_UPDATE_INTERVAL_MS = 30 * 1000;
 const GAME_AFK_SWEEP_INTERVAL_MS = 30 * 1000;
+const STORAGE_RELOAD_INTERVAL_MS = 60 * 1000;
 const GAME_AFK_MAX_HOURS = 4;
 const MP_REPORT_CHANNEL_ID = "1315852973368152155";
 const MP_REPORT_REVIEWER_ID = "629552401237540874";
@@ -2301,6 +2302,16 @@ async function handleClientReady(readyClient) {
     });
   }, GAME_AFK_SWEEP_INTERVAL_MS);
   gameAfkSweep.unref?.();
+
+  // Periodically (rather than before every single interaction) pick up data changed
+  // directly in the database, so manual edits still apply without a restart but without
+  // adding a blocking MySQL round-trip in front of every button/command's 3-second ack window.
+  const storageReloadSweep = setInterval(() => {
+    reloadStorage().catch((error) => {
+      console.error("Background storage reload failed:", error);
+    });
+  }, STORAGE_RELOAD_INTERVAL_MS);
+  storageReloadSweep.unref?.();
 }
 
 client.once(Events.ClientReady, (readyClient) => {
@@ -2811,7 +2822,6 @@ client.on(Events.GuildMemberUpdate, (oldMember, newMember) => {
 });
 
 async function handleInteraction(interaction) {
-  await reloadStorage();
   if (interaction.isButton() && interaction.customId.startsWith("action-cancel:")) {
     const id = interaction.customId.slice("action-cancel:".length);
     const pending = pendingConfirmations.get(id);
