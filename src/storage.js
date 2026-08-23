@@ -8,7 +8,7 @@ const CERT_PATH = path.join(ROOT, "ca_mysql.crt");
 const state = {
   applications: {},
   botInfo: {},
-  captReplayWindow: { isOpen: false, openedAt: null, openedBy: null, threadId: null },
+  captReplayWindow: { isOpen: false, openedAt: null, openedBy: null, threadId: null, openCount: 0, threadHistory: [] },
   mpPoints: {},
   mpRequests: {},
   ranks: {},
@@ -48,6 +48,19 @@ function parseJson(value) {
   } catch {
     return {};
   }
+}
+
+function parseJsonArray(value) {
+  if (Array.isArray(value)) return value;
+  if (typeof value === "string") {
+    try {
+      const parsed = JSON.parse(value);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  }
+  return [];
 }
 
 function queueWrite(label, operation) {
@@ -137,7 +150,7 @@ async function initStorage() {
 function resetState() {
   state.applications = {};
   state.botInfo = {};
-  state.captReplayWindow = { isOpen: false, openedAt: null, openedBy: null, threadId: null };
+  state.captReplayWindow = { isOpen: false, openedAt: null, openedBy: null, threadId: null, openCount: 0, threadHistory: [] };
   state.mpPoints = {};
   state.mpRequests = {};
   state.ranks = {};
@@ -170,13 +183,15 @@ async function loadState() {
   };
 
   const [captReplayRows] = await pool.query(
-    "SELECT is_open, opened_at, opened_by, thread_id FROM capt_replay_window WHERE id = 1"
+    "SELECT is_open, opened_at, opened_by, thread_id, open_count, thread_history FROM capt_replay_window WHERE id = 1"
   );
   state.captReplayWindow = {
     isOpen: Boolean(captReplayRows[0]?.is_open),
     openedAt: isoDate(captReplayRows[0]?.opened_at),
     openedBy: captReplayRows[0]?.opened_by ?? null,
-    threadId: captReplayRows[0]?.thread_id ?? null
+    threadId: captReplayRows[0]?.thread_id ?? null,
+    openCount: Number(captReplayRows[0]?.open_count ?? 0),
+    threadHistory: parseJsonArray(captReplayRows[0]?.thread_history)
   };
 
   const [users] = await pool.query("SELECT * FROM users");
@@ -454,15 +469,24 @@ function saveCaptReplayWindow(window) {
   state.captReplayWindow = window;
   return queueWrite("capt replay window", async () => {
     await pool.execute(
-      `INSERT INTO capt_replay_window (id, is_open, opened_at, opened_by, thread_id, updated_at)
-       VALUES (1, ?, ?, ?, ?, CURRENT_TIMESTAMP(3))
+      `INSERT INTO capt_replay_window (id, is_open, opened_at, opened_by, thread_id, open_count, thread_history, updated_at)
+       VALUES (1, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP(3))
        ON DUPLICATE KEY UPDATE
          is_open = VALUES(is_open),
          opened_at = VALUES(opened_at),
          opened_by = VALUES(opened_by),
          thread_id = VALUES(thread_id),
+         open_count = VALUES(open_count),
+         thread_history = VALUES(thread_history),
          updated_at = CURRENT_TIMESTAMP(3)`,
-      [Boolean(window.isOpen), mysqlDate(window.openedAt), window.openedBy ?? null, window.threadId ?? null]
+      [
+        Boolean(window.isOpen),
+        mysqlDate(window.openedAt),
+        window.openedBy ?? null,
+        window.threadId ?? null,
+        Number(window.openCount) || 0,
+        json(window.threadHistory ?? [])
+      ]
     );
   });
 }

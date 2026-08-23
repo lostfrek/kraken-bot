@@ -2097,9 +2097,23 @@ async function processExpiredGameAfkSessions(clientInstance) {
   }
 }
 
+async function deleteCaptReplayThreads(guild, threadIds) {
+  for (const threadId of threadIds) {
+    const thread = await guild.channels.fetch(threadId).catch(() => null);
+    if (thread?.isThread()) await thread.delete("Плановая очистка старых веток откатов").catch(() => null);
+  }
+}
+
 async function openCaptReplayWindow(guild, adminId) {
+  const current = getCaptReplayWindow();
+  const openCount = (Number(current.openCount) || 0) + 1;
+  // Every 5th opening, purge the threads accumulated from the previous 4 closes.
+  const purge = openCount % 5 === 0;
+  const threadHistory = purge ? [] : (current.threadHistory ?? []);
+  if (purge) await deleteCaptReplayThreads(guild, current.threadHistory ?? []);
+
   const openedAt = new Date().toISOString();
-  await saveCaptReplayWindow({ isOpen: true, openedAt, openedBy: adminId, threadId: null });
+  await saveCaptReplayWindow({ isOpen: true, openedAt, openedBy: adminId, threadId: null, openCount, threadHistory });
   const panelMessage = await refreshStaticPanel(
     guild,
     CAPT_REPLAY_CHANNEL_ID,
@@ -2111,7 +2125,7 @@ async function openCaptReplayWindow(guild, adminId) {
     // A standalone thread (not attached to the panel message) so a new one can be created
     // every time the window opens - a message can only ever have one thread created from it.
     const thread = await panelMessage.channel.threads.create({
-      name: `Откаты CAPT — ${new Date(openedAt).toLocaleDateString("ru-RU")}`,
+      name: `Откаты Капт — ${new Date(openedAt).toLocaleDateString("ru-RU")}`,
       autoArchiveDuration: 1440,
       type: ChannelType.PublicThread,
       reason: `Приём откатов открыт: ${adminId}`
@@ -2126,7 +2140,7 @@ async function openCaptReplayWindow(guild, adminId) {
       await threadNotice?.delete().catch(() => null);
     }
   }
-  const finalWindow = { isOpen: true, openedAt, openedBy: adminId, threadId };
+  const finalWindow = { isOpen: true, openedAt, openedBy: adminId, threadId, openCount, threadHistory };
   await saveCaptReplayWindow(finalWindow);
   return finalWindow;
 }
@@ -2139,7 +2153,8 @@ async function closeCaptReplayWindow(guild, window) {
       await thread.setArchived(true, "Приём откатов закрыт").catch(() => null);
     }
   }
-  await saveCaptReplayWindow({ ...window, isOpen: false, threadId: null });
+  const threadHistory = [...(window.threadHistory ?? []), window.threadId].filter(Boolean);
+  await saveCaptReplayWindow({ ...window, isOpen: false, threadId: null, threadHistory });
   await refreshStaticPanel(
     guild,
     CAPT_REPLAY_CHANNEL_ID,
@@ -2159,7 +2174,7 @@ async function processCaptReplayExpiry(clientInstance) {
   await closeCaptReplayWindow(guild, window);
   await sendLog(guild, new EmbedBuilder()
     .setColor(0xf2c94c)
-    .setTitle("Приём откатов CAPT закрыт автоматически")
+    .setTitle("Приём откатов Капт закрыт автоматически")
     .setDescription("Истекло время окна приёма откатов (1 час 30 минут)."));
 }
 
@@ -3199,7 +3214,7 @@ async function handleInteraction(interaction) {
           interaction.guild,
           new EmbedBuilder()
             .setColor(0xeb5757)
-            .setTitle("Приём откатов CAPT закрыт")
+            .setTitle("Приём откатов Капт закрыт")
             .setDescription(`<@${interaction.user.id}> закрыл приём откатов.`)
         );
         await interaction.editReply({ content: successMessage("Приём откатов закрыт.") });
@@ -3212,7 +3227,7 @@ async function handleInteraction(interaction) {
         interaction.guild,
         new EmbedBuilder()
           .setColor(0x27ae60)
-          .setTitle("Приём откатов CAPT открыт")
+          .setTitle("Приём откатов Капт открыт")
           .setDescription(`<@${interaction.user.id}> открыл приём откатов.`)
       );
       await interaction.editReply({
@@ -3619,7 +3634,7 @@ async function handleInteraction(interaction) {
       content: config.leadershipRoleIds.map((roleId) => `<@&${roleId}>`).join(" "),
       embeds: [new EmbedBuilder()
         .setColor(0x79040c)
-        .setTitle("Новый откат!")
+        .setTitle("Новый откат с капта!")
         .setDescription(`Отправитель: <@${interaction.user.id}>\nСсылка: ${rawUrl}`)
         .setFooter({ text: interaction.user.id })
         .setTimestamp()],
