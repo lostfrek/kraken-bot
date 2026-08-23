@@ -2131,12 +2131,11 @@ async function openCaptReplayWindow(guild, adminId) {
 async function closeCaptReplayWindow(guild, window) {
   if (window.threadId) {
     const thread = await guild.channels.fetch(window.threadId).catch(() => null);
-    if (thread?.isThread() && !thread.archived) {
-      await thread.setLocked(true, "Приём откатов закрыт").catch(() => null);
-      await thread.setArchived(true, "Приём откатов закрыт").catch(() => null);
+    if (thread?.isThread()) {
+      await thread.delete("Приём откатов закрыт").catch(() => null);
     }
   }
-  await saveCaptReplayWindow({ ...window, isOpen: false });
+  await saveCaptReplayWindow({ ...window, isOpen: false, threadId: null });
   await refreshStaticPanel(
     guild,
     CAPT_REPLAY_CHANNEL_ID,
