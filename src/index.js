@@ -1765,7 +1765,7 @@ function buildCaptReplayPanel(window) {
       "откат — так руководству удобно рассматривать их все в одном месте.\n\n" +
       (open
         ? `**Приём открыт до ${discordTimestampFromMs(expiresAt)}.**`
-        : "**Приём сейчас закрыт.** Дождитесь, пока руководство его откроет.")
+        : "**Приём сейчас закрыт.**")
     );
   const row = new ActionRowBuilder().addComponents(
     new ButtonBuilder()
