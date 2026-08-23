@@ -20,6 +20,7 @@ const {
   GatewayIntentBits,
   LabelBuilder,
   MessageFlags,
+  MessageType,
   ModalBuilder,
   Partials,
   PermissionFlagsBits,
@@ -2116,6 +2117,11 @@ async function openCaptReplayWindow(guild, adminId) {
       return null;
     });
     threadId = thread?.id ?? null;
+    if (thread) {
+      const recentMessages = await panelMessage.channel.messages.fetch({ limit: 5 }).catch(() => null);
+      const threadNotice = recentMessages?.find((message) => message.type === MessageType.ThreadCreated);
+      await threadNotice?.delete().catch(() => null);
+    }
   }
   const finalWindow = { isOpen: true, openedAt, openedBy: adminId, threadId };
   await saveCaptReplayWindow(finalWindow);
