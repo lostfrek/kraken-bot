@@ -2134,8 +2134,9 @@ async function openCaptReplayWindow(guild, adminId) {
 async function closeCaptReplayWindow(guild, window) {
   if (window.threadId) {
     const thread = await guild.channels.fetch(window.threadId).catch(() => null);
-    if (thread?.isThread()) {
-      await thread.delete("Приём откатов закрыт").catch(() => null);
+    if (thread?.isThread() && !thread.archived) {
+      await thread.setLocked(true, "Приём откатов закрыт").catch(() => null);
+      await thread.setArchived(true, "Приём откатов закрыт").catch(() => null);
     }
   }
   await saveCaptReplayWindow({ ...window, isOpen: false, threadId: null });
@@ -3615,13 +3616,14 @@ async function handleInteraction(interaction) {
       return;
     }
     await thread.send({
+      content: config.leadershipRoleIds.map((roleId) => `<@&${roleId}>`).join(" "),
       embeds: [new EmbedBuilder()
         .setColor(0x79040c)
         .setTitle("Новый откат!")
         .setDescription(`Отправитель: <@${interaction.user.id}>\nСсылка: ${rawUrl}`)
         .setFooter({ text: interaction.user.id })
         .setTimestamp()],
-      allowedMentions: { parse: [], users: [], roles: [] }
+      allowedMentions: { roles: [...config.leadershipRoleIds] }
     }).catch(() => null);
     await interaction.editReply({ content: successMessage("Откат отправлен!") });
     return;
