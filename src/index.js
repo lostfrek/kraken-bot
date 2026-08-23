@@ -222,8 +222,7 @@ const APPLICATION_REJECTION_COOLDOWN_MS = 10 * 24 * 60 * 60 * 1000;
 const APPLICATION_PANEL_CHANNEL_ID = "1315860449442398239";
 const SUPPORT_PANEL_CHANNEL_ID = "1509572136694452407";
 const ADMIN_PANEL_CHANNEL_ID = "1291543297747194010";
-const RP_MEMBER_ROLE_ID = "1265995505524015245";
-const CAPT_MEMBER_ROLE_ID = "1532351848244187206";
+const VERIFIED_MEMBER_ROLE_ID = "1265995505524015245";
 const SUPPORT_REQUEST_TYPES = {
   mp_points: "Заявка на начисление баллов",
   bonus: "Заявка на премию",
@@ -1366,7 +1365,6 @@ function buildApplicationMessagePayload(application) {
         `**IC имя / уровень / Static ID:** ${value(application.characterInfo)}\n` +
         `**OOC возраст:** ${value(application.oocAge)}\n` +
         (application.requestType === "capt" ? `**Кем хочет быть:** ${value(application.captRole)}\n` : "") +
-        (application.requestType === "capt" ? `**Откат с Арены:** ${value(application.arenaReplayUrl)}\n` : "") +
         `**Почему хочет вступить:** ${value(application.reason)}`
       )
     )
@@ -1749,13 +1747,6 @@ function buildApplicationModal(section) {
     .setStyle(TextInputStyle.Paragraph)
     .setRequired(true);
 
-  const arenaReplay = new TextInputBuilder()
-    .setCustomId("arena_replay_url")
-    .setLabel("Откат с Арены")
-    .setPlaceholder("Откат: 5 минут, полная группа на Арене, оружие — Сайга + Тяжка, ссылка на YouTube.")
-    .setStyle(TextInputStyle.Short)
-    .setRequired(true);
-
   const captRole = new StringSelectMenuBuilder()
     .setCustomId("capt_role")
     .setPlaceholder("Выберите Collers или Main")
@@ -1774,8 +1765,7 @@ function buildApplicationModal(section) {
     modal.addComponents(
       new LabelBuilder()
         .setLabel("Кем хотите быть?")
-        .setStringSelectMenuComponent(captRole),
-      new ActionRowBuilder().addComponents(arenaReplay)
+        .setStringSelectMenuComponent(captRole)
     );
   }
 
@@ -3835,13 +3825,10 @@ async function handleInteraction(interaction) {
       });
       return;
     }
-    const memberRoleId = application.requestType === "capt"
-      ? CAPT_MEMBER_ROLE_ID
-      : RP_MEMBER_ROLE_ID;
     const familyNickname = buildFamilyNickname(1, application.characterInfo);
     let nicknameError = null;
     try {
-      await member.roles.add(memberRoleId, `Принята заявка в ${applicationSectionLabel(application.requestType)}`);
+      await member.roles.add(VERIFIED_MEMBER_ROLE_ID, `Принята заявка в ${applicationSectionLabel(application.requestType)}`);
       const oldRank = getRankFromMemberRoles(member);
       await syncMemberRankRole(member, 1);
       await addUserAudit(member.id, "rank", {
@@ -4359,9 +4346,6 @@ async function handleInteraction(interaction) {
       });
       return;
     }
-    const arenaReplayUrl = section === "capt"
-      ? interaction.fields.getTextInputValue("arena_replay_url").trim()
-      : null;
     const captRole = section === "capt"
       ? interaction.fields.getStringSelectValues("capt_role")[0]
       : null;
@@ -4369,23 +4353,11 @@ async function handleInteraction(interaction) {
       await interaction.editReply({ content: errorMessage("Выберите, кем хотите быть: Collers или Main.") });
       return;
     }
-    if (arenaReplayUrl) {
-      try {
-        const replayUrl = new URL(arenaReplayUrl);
-        if (!["youtube.com", "www.youtube.com", "youtu.be", "www.youtu.be"].includes(replayUrl.hostname.toLowerCase())) {
-          throw new Error("Unsupported host");
-        }
-      } catch {
-        await interaction.editReply({ content: errorMessage("В поле «Откат с Арены» укажите корректную ссылку на YouTube.") });
-        return;
-      }
-    }
     const values = {
       characterInfo,
       oocAge: interaction.fields.getTextInputValue("ooc_age"),
       reason: interaction.fields.getTextInputValue("reason"),
-      captRole,
-      arenaReplayUrl
+      captRole
     };
 
     await interaction.editReply({
@@ -4406,7 +4378,6 @@ async function handleInteraction(interaction) {
       oocAge: values.oocAge,
       reason: values.reason,
       captRole: values.captRole,
-      arenaReplayUrl: values.arenaReplayUrl,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString()
     };
@@ -4461,10 +4432,7 @@ async function handleInteraction(interaction) {
           { name: "Состав", value: applicationSectionLabel(application.requestType), inline: true },
           { name: "IC имя / уровень / Static ID", value: String(application.characterInfo).slice(0, 1024) },
           ...(application.requestType === "capt"
-            ? [
-                { name: "Кем хочет быть", value: String(application.captRole).slice(0, 1024), inline: true },
-                { name: "Откат с Арены", value: String(application.arenaReplayUrl).slice(0, 1024) }
-              ]
+            ? [{ name: "Кем хочет быть", value: String(application.captRole).slice(0, 1024), inline: true }]
             : []),
           { name: "OOC возраст", value: String(application.oocAge).slice(0, 1024), inline: true }
         )
