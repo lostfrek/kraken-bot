@@ -1190,6 +1190,7 @@ function buildInfoMenu() {
 }
 
 function rankDisplayName(rank) {
+  if (rank === 8) return "High Staff";
   if (rank === 9) return "Deputy Leader";
   if (rank === 10) return "Leader";
   return rank ? String(rank) : "Не в фаме";
