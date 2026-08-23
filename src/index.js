@@ -224,9 +224,6 @@ const SUPPORT_PANEL_CHANNEL_ID = "1509572136694452407";
 const ADMIN_PANEL_CHANNEL_ID = "1291543297747194010";
 const RP_MEMBER_ROLE_ID = "1265995505524015245";
 const CAPT_MEMBER_ROLE_ID = "1532351848244187206";
-const TICKET_NOTIFICATION_ROLE_ID = "1266010750699442206";
-const APPLICATION_REVIEWER_ROLE_ID = "1515822154396991488";
-const EXTRA_TICKET_PING_ROLE_IDS = ["1515813606917148797", "1265995446975856691"];
 const SUPPORT_REQUEST_TYPES = {
   mp_points: "Заявка на начисление баллов",
   bonus: "Заявка на премию",
@@ -268,22 +265,16 @@ let ocrQueue = Promise.resolve();
 let lastKnownOrlandoOnline = null;
 
 function isLeadership(member) {
-  return config.leadershipRoleIds.some((roleId) => member.roles.cache.has(roleId));
+  return Boolean(member?.roles?.cache) &&
+    config.leadershipRoleIds.some((roleId) => member.roles.cache.has(roleId));
 }
 
 function isApplicationReviewer(member) {
-  return Boolean(
-    member?.permissions?.has(PermissionFlagsBits.Administrator) ||
-    member?.roles?.cache?.has(TICKET_NOTIFICATION_ROLE_ID) ||
-    member?.roles?.cache?.has(APPLICATION_REVIEWER_ROLE_ID)
-  );
+  return Boolean(member?.permissions?.has(PermissionFlagsBits.Administrator)) || isLeadership(member);
 }
 
 function isSupportReviewer(member) {
-  return Boolean(
-    member?.permissions?.has(PermissionFlagsBits.Administrator) ||
-    member?.roles?.cache?.has(TICKET_NOTIFICATION_ROLE_ID)
-  );
+  return Boolean(member?.permissions?.has(PermissionFlagsBits.Administrator)) || isLeadership(member);
 }
 
 function applicationSectionLabel(section) {
@@ -1199,14 +1190,12 @@ function buildInfoMenu() {
 }
 
 function rankDisplayName(rank) {
-  if (rank === 4) return "PR Assistant";
   if (rank === 9) return "Deputy Leader";
   if (rank === 10) return "Leader";
   return rank ? String(rank) : "Не в фаме";
 }
 
 function rankNicknamePrefix(rank) {
-  if (rank === 4) return "PR";
   if (rank === 9) return "Deputy";
   if (rank === 10) return "Leader";
   return String(rank);
@@ -1381,8 +1370,7 @@ function buildApplicationMessagePayload(application) {
     )
     .addTextDisplayComponents(
       new TextDisplayBuilder().setContent(
-        `-# <@&${TICKET_NOTIFICATION_ROLE_ID}> · <@&${APPLICATION_REVIEWER_ROLE_ID}>` +
-        EXTRA_TICKET_PING_ROLE_IDS.map((roleId) => ` · <@&${roleId}>`).join("")
+        `-# ${config.leadershipRoleIds.map((roleId) => `<@&${roleId}>`).join(" · ")}`
       )
     );
   if (!closed) container.addActionRowComponents(...applicationButtons(application));
@@ -1391,7 +1379,7 @@ function buildApplicationMessagePayload(application) {
     embeds: [],
     components: [container],
     flags: MessageFlags.IsComponentsV2,
-    allowedMentions: { roles: [TICKET_NOTIFICATION_ROLE_ID, APPLICATION_REVIEWER_ROLE_ID, ...EXTRA_TICKET_PING_ROLE_IDS] }
+    allowedMentions: { roles: [...config.leadershipRoleIds] }
   };
 }
 
@@ -1946,7 +1934,7 @@ async function ensureTicketReviewerParentAccess(parent, reviewerRoleIds) {
   }));
 }
 
-async function createPrivateTicketThread(interaction, name, reviewerRoleIds = [TICKET_NOTIFICATION_ROLE_ID]) {
+async function createPrivateTicketThread(interaction, name, reviewerRoleIds = config.leadershipRoleIds) {
   const parent = interaction.channel;
   if (!parent?.isTextBased() || !parent.threads) {
     throw new Error("Панель заявок должна находиться в обычном текстовом канале с поддержкой веток.");
@@ -1967,11 +1955,7 @@ async function createPrivateTicketThread(interaction, name, reviewerRoleIds = [T
 }
 
 async function createApplicationChannel(interaction, uid) {
-  return createPrivateTicketThread(
-    interaction,
-    uid,
-    [TICKET_NOTIFICATION_ROLE_ID, APPLICATION_REVIEWER_ROLE_ID]
-  );
+  return createPrivateTicketThread(interaction, uid);
 }
 
 async function refreshApplicationPanel(guild) {
@@ -2050,7 +2034,7 @@ function buildSupportTicketMessagePayload(ticket, user) {
   };
   const closed = ["closed", "approved", "rejected"].includes(ticket.status);
   const reviewerMention = ticket.status === "new"
-    ? ` | <@&${TICKET_NOTIFICATION_ROLE_ID}>${EXTRA_TICKET_PING_ROLE_IDS.map((roleId) => ` <@&${roleId}>`).join("")}`
+    ? ` | ${config.leadershipRoleIds.map((roleId) => `<@&${roleId}>`).join(" ")}`
     : "";
   const container = new ContainerBuilder()
     .setAccentColor(0x79040c)
@@ -2078,7 +2062,7 @@ function buildSupportTicketMessagePayload(ticket, user) {
     embeds: [],
     components: [container],
     flags: MessageFlags.IsComponentsV2,
-    allowedMentions: { roles: [TICKET_NOTIFICATION_ROLE_ID, ...EXTRA_TICKET_PING_ROLE_IDS] }
+    allowedMentions: { roles: [...config.leadershipRoleIds] }
   };
 }
 
@@ -2307,10 +2291,7 @@ async function handleClientReady(readyClient) {
     await processExpiredGameAfkSessions(readyClient);
     const applicationParent = await guild.channels.fetch(APPLICATION_PANEL_CHANNEL_ID).catch(() => null);
     if (applicationParent?.isTextBased()) {
-      await ensureTicketReviewerParentAccess(applicationParent, [
-        TICKET_NOTIFICATION_ROLE_ID,
-        APPLICATION_REVIEWER_ROLE_ID
-      ]);
+      await ensureTicketReviewerParentAccess(applicationParent, config.leadershipRoleIds);
       await refreshApplicationPanel(guild);
     }
     await refreshStaticPanel(guild, SUPPORT_PANEL_CHANNEL_ID, "support:create", buildSupportPanel);
