@@ -226,6 +226,7 @@ const RP_MEMBER_ROLE_ID = "1265995505524015245";
 const CAPT_MEMBER_ROLE_ID = "1532351848244187206";
 const TICKET_NOTIFICATION_ROLE_ID = "1266010750699442206";
 const APPLICATION_REVIEWER_ROLE_ID = "1515822154396991488";
+const EXTRA_TICKET_PING_ROLE_IDS = ["1515813606917148797", "1265995446975856691"];
 const SUPPORT_REQUEST_TYPES = {
   mp_points: "Заявка на начисление баллов",
   bonus: "Заявка на премию",
@@ -607,26 +608,35 @@ function clearMemberMpPoints(userId) {
   return saveMpPoints(points);
 }
 
+function rankRoleIdsFor(rank) {
+  const roleId = config.rankRoleIds[String(rank)];
+  return roleId ? (Array.isArray(roleId) ? roleId : [roleId]) : [];
+}
+
 async function syncMemberRankRole(member, rank) {
   if (!member || !rank) return;
   const configuredRoles = Object.values(config.rankRoleIds)
+    .flatMap((roleId) => Array.isArray(roleId) ? roleId : [roleId])
     .map((roleId) => member.guild.roles.cache.get(roleId))
     .filter(Boolean);
   const currentRankRoles = configuredRoles.filter((role) => member.roles.cache.has(role.id));
-  const targetRole = member.guild.roles.cache.get(config.rankRoleIds[String(rank)]);
-  if (!targetRole) throw new Error(`Роль для ${rank} ранга не найдена на Discord-сервере.`);
-  const unmanageableRole = [...new Set([...currentRankRoles, targetRole].filter(Boolean))]
+  const targetRoles = rankRoleIdsFor(rank)
+    .map((roleId) => member.guild.roles.cache.get(roleId))
+    .filter(Boolean);
+  if (!targetRoles.length) throw new Error(`Роль для ${rank} ранга не найдена на Discord-сервере.`);
+  const unmanageableRole = [...new Set([...currentRankRoles, ...targetRoles])]
     .find((role) => !role.editable);
   if (unmanageableRole) {
     throw new Error(`Бот не может управлять ролью «${unmanageableRole.name}»: роль бота расположена ниже неё.`);
   }
   botRankChanges.set(member.id, Date.now() + 15_000);
 
-  if (!member.roles.cache.has(targetRole.id)) await member.roles.add(targetRole);
+  const targetRoleIds = new Set(targetRoles.map((role) => role.id));
+  for (const role of targetRoles) {
+    if (!member.roles.cache.has(role.id)) await member.roles.add(role);
+  }
   for (const role of currentRankRoles) {
-    if (role.id !== targetRole.id) {
-      await member.roles.remove(role.id);
-    }
+    if (!targetRoleIds.has(role.id)) await member.roles.remove(role.id);
   }
 }
 
@@ -634,7 +644,10 @@ function getRankFromMemberRoles(member) {
   if (!member?.roles?.cache) return null;
 
   const ranks = Object.entries(config.rankRoleIds)
-    .filter(([, roleId]) => roleId && member.roles.cache.has(roleId))
+    .filter(([, roleId]) => {
+      const roleIds = Array.isArray(roleId) ? roleId : [roleId];
+      return roleIds.some((id) => id && member.roles.cache.has(id));
+    })
     .map(([rank]) => Number.parseInt(rank, 10))
     .filter(Number.isFinite);
 
@@ -1362,7 +1375,8 @@ function buildApplicationMessagePayload(application) {
     )
     .addTextDisplayComponents(
       new TextDisplayBuilder().setContent(
-        `-# <@&${TICKET_NOTIFICATION_ROLE_ID}> · <@&${APPLICATION_REVIEWER_ROLE_ID}>`
+        `-# <@&${TICKET_NOTIFICATION_ROLE_ID}> · <@&${APPLICATION_REVIEWER_ROLE_ID}>` +
+        EXTRA_TICKET_PING_ROLE_IDS.map((roleId) => ` · <@&${roleId}>`).join("")
       )
     );
   if (!closed) container.addActionRowComponents(...applicationButtons(application));
@@ -1371,7 +1385,7 @@ function buildApplicationMessagePayload(application) {
     embeds: [],
     components: [container],
     flags: MessageFlags.IsComponentsV2,
-    allowedMentions: { roles: [TICKET_NOTIFICATION_ROLE_ID, APPLICATION_REVIEWER_ROLE_ID] }
+    allowedMentions: { roles: [TICKET_NOTIFICATION_ROLE_ID, APPLICATION_REVIEWER_ROLE_ID, ...EXTRA_TICKET_PING_ROLE_IDS] }
   };
 }
 
@@ -2029,7 +2043,9 @@ function buildSupportTicketMessagePayload(ticket, user) {
     closed: "Закрыто"
   };
   const closed = ["closed", "approved", "rejected"].includes(ticket.status);
-  const reviewerMention = ticket.status === "new" ? ` | <@&${TICKET_NOTIFICATION_ROLE_ID}>` : "";
+  const reviewerMention = ticket.status === "new"
+    ? ` | <@&${TICKET_NOTIFICATION_ROLE_ID}>${EXTRA_TICKET_PING_ROLE_IDS.map((roleId) => ` <@&${roleId}>`).join("")}`
+    : "";
   const container = new ContainerBuilder()
     .setAccentColor(0x79040c)
     .addTextDisplayComponents(
@@ -2056,7 +2072,7 @@ function buildSupportTicketMessagePayload(ticket, user) {
     embeds: [],
     components: [container],
     flags: MessageFlags.IsComponentsV2,
-    allowedMentions: { roles: [TICKET_NOTIFICATION_ROLE_ID] }
+    allowedMentions: { roles: [TICKET_NOTIFICATION_ROLE_ID, ...EXTRA_TICKET_PING_ROLE_IDS] }
   };
 }
 
@@ -3547,7 +3563,7 @@ async function handleInteraction(interaction) {
         warnings[member.id] ??= { active: [], history: [] };
         if (action === "add") {
           const current = warnings[member.id].active.length;
-          if (current >= 3 || (current === 2 && !member.kickable)) {
+          if (current >= 3 || (current === 2 && !member.manageable)) {
             failed.push(`<@${member.id}> — варн выдать нельзя`);
             continue;
           }
@@ -3558,7 +3574,9 @@ async function handleInteraction(interaction) {
           const count = warnings[member.id].active.length;
           if (count < 3) await syncWarnRoles(member, count);
           await dmUser(member, { embeds: [new EmbedBuilder().setColor(0x79040c).setTitle("Получен варн").addFields({ name: "Причина", value: reason }, { name: "Всего варнов", value: `${count}/3` }, { name: "Администратор", value: `<@${interaction.user.id}>` })] });
-          if (count >= 3) await member.kick(`3/3 варнов. Выдал: ${interaction.user.tag}. Причина: ${reason}`);
+          if (count >= 3) {
+            await member.roles.set([], `3/3 варнов. Выдал: ${interaction.user.tag}. Причина: ${reason}`);
+          }
           completed.push(`<@${member.id}> — выдан варн **${count}/3**`);
           logLines.push(`<@${member.id}> — **${count}/3**`);
         } else {
