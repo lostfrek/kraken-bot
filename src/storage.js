@@ -8,6 +8,7 @@ const CERT_PATH = path.join(ROOT, "ca_mysql.crt");
 const state = {
   applications: {},
   botInfo: {},
+  captReplayWindow: { isOpen: false, openedAt: null, openedBy: null },
   mpPoints: {},
   mpRequests: {},
   ranks: {},
@@ -136,6 +137,7 @@ async function initStorage() {
 function resetState() {
   state.applications = {};
   state.botInfo = {};
+  state.captReplayWindow = { isOpen: false, openedAt: null, openedBy: null };
   state.mpPoints = {};
   state.mpRequests = {};
   state.ranks = {};
@@ -165,6 +167,15 @@ async function loadState() {
     rpRecruitmentOpen: Boolean(rpSettings?.recruitment_open),
     captUpdatedAt: isoDate(captSettings?.updated_at),
     rpUpdatedAt: isoDate(rpSettings?.updated_at)
+  };
+
+  const [captReplayRows] = await pool.query(
+    "SELECT is_open, opened_at, opened_by FROM capt_replay_window WHERE id = 1"
+  );
+  state.captReplayWindow = {
+    isOpen: Boolean(captReplayRows[0]?.is_open),
+    openedAt: isoDate(captReplayRows[0]?.opened_at),
+    openedBy: captReplayRows[0]?.opened_by ?? null
   };
 
   const [users] = await pool.query("SELECT * FROM users");
@@ -304,6 +315,7 @@ async function loadState() {
 
 function getWarnings() { return state.warnings; }
 function getBotInfo() { return state.botInfo; }
+function getCaptReplayWindow() { return state.captReplayWindow; }
 function getApplications() { return state.applications; }
 function getMpPoints() { return state.mpPoints; }
 function getUserDb() { return state.users; }
@@ -434,6 +446,22 @@ function saveBotInfo(info, section = "both") {
         [id, sectionName, open]
       );
     }
+  });
+}
+
+function saveCaptReplayWindow(window) {
+  state.captReplayWindow = window;
+  return queueWrite("capt replay window", async () => {
+    await pool.execute(
+      `INSERT INTO capt_replay_window (id, is_open, opened_at, opened_by, updated_at)
+       VALUES (1, ?, ?, ?, CURRENT_TIMESTAMP(3))
+       ON DUPLICATE KEY UPDATE
+         is_open = VALUES(is_open),
+         opened_at = VALUES(opened_at),
+         opened_by = VALUES(opened_by),
+         updated_at = CURRENT_TIMESTAMP(3)`,
+      [Boolean(window.isOpen), mysqlDate(window.openedAt), window.openedBy ?? null]
+    );
   });
 }
 
@@ -761,6 +789,7 @@ module.exports = {
   getActiveGameAfkSessions,
   getApplications,
   getBotInfo,
+  getCaptReplayWindow,
   getGameAfkSession,
   getMpPoints,
   getMpRequests,
@@ -773,6 +802,7 @@ module.exports = {
   removeGameAfkSession,
   saveApplications,
   saveBotInfo,
+  saveCaptReplayWindow,
   saveGameAfkSession,
   saveMpPoints,
   saveMpRequests,

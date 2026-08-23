@@ -25,7 +25,12 @@ const commands = [
         .setDescription("Голосовой канал, в который нужно переместить участников")
         .addChannelTypes(ChannelType.GuildVoice)
         .setRequired(true)
-    )
+    ),
+
+  new SlashCommandBuilder()
+    .setName("capts")
+    .setDescription("Открыть или закрыть приём откатов CAPT на 1 час 30 минут.")
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageRoles)
 ].map((command) => command.toJSON());
 
 async function main() {

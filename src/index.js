@@ -38,6 +38,7 @@ const {
   getActiveGameAfkSessions,
   getApplications,
   getBotInfo,
+  getCaptReplayWindow,
   getGameAfkSession,
   getMpPoints,
   getMpRequests,
@@ -50,6 +51,7 @@ const {
   removeGameAfkSession,
   saveApplications,
   saveBotInfo,
+  saveCaptReplayWindow,
   saveGameAfkSession,
   saveMpPoints,
   saveMpRequests,
@@ -222,6 +224,9 @@ const APPLICATION_REJECTION_COOLDOWN_MS = 10 * 24 * 60 * 60 * 1000;
 const APPLICATION_PANEL_CHANNEL_ID = "1315860449442398239";
 const SUPPORT_PANEL_CHANNEL_ID = "1509572136694452407";
 const ADMIN_PANEL_CHANNEL_ID = "1291543297747194010";
+const CAPT_REPLAY_CHANNEL_ID = "1540244840250351666";
+const CAPT_REPLAY_WINDOW_MS = 90 * 60 * 1000;
+const CAPT_REPLAY_SWEEP_INTERVAL_MS = 30 * 1000;
 const VERIFIED_MEMBER_ROLE_ID = "1265995505524015245";
 const SUPPORT_REQUEST_TYPES = {
   mp_points: "Заявка на начисление баллов",
@@ -1721,6 +1726,63 @@ function buildGameAfkModal() {
   return modal;
 }
 
+function parseYoutubeUrl(rawUrl) {
+  try {
+    const url = new URL(rawUrl);
+    if (!["youtube.com", "www.youtube.com", "youtu.be", "www.youtu.be"].includes(url.hostname.toLowerCase())) {
+      return null;
+    }
+    return url;
+  } catch {
+    return null;
+  }
+}
+
+function captReplayWindowExpiresAt(window) {
+  const openedAtMs = Date.parse(window.openedAt ?? "");
+  return Number.isFinite(openedAtMs) ? openedAtMs + CAPT_REPLAY_WINDOW_MS : null;
+}
+
+function isCaptReplayWindowOpen(window) {
+  const expiresAt = captReplayWindowExpiresAt(window);
+  return Boolean(window.isOpen) && expiresAt !== null && Date.now() < expiresAt;
+}
+
+function buildCaptReplayPanel(window) {
+  const open = isCaptReplayWindowOpen(window);
+  const expiresAt = captReplayWindowExpiresAt(window);
+  const embed = new EmbedBuilder()
+    .setColor(0x79040c)
+    .setTitle("Загрузка откатов CAPT")
+    .setDescription(
+      open
+        ? `Приём откатов открыт до ${discordTimestampFromMs(expiresAt)}. Нажмите «Загрузить откат» и пришлите ссылку на YouTube с записью.`
+        : "Приём откатов сейчас закрыт. Дождитесь, пока руководство откроет приём."
+    );
+  const row = new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId("capt_replay:upload")
+      .setLabel("Загрузить откат")
+      .setStyle(ButtonStyle.Secondary)
+      .setDisabled(!open)
+  );
+  return { content: null, embeds: [embed], components: [row] };
+}
+
+function buildCaptReplayModal() {
+  const modal = new ModalBuilder()
+    .setCustomId(modalCustomId("capt_replay", "submit"))
+    .setTitle("Загрузить откат");
+  const url = new TextInputBuilder()
+    .setCustomId("url")
+    .setLabel("Ссылка на YouTube")
+    .setPlaceholder("https://youtu.be/...")
+    .setStyle(TextInputStyle.Short)
+    .setRequired(true);
+  modal.addComponents(new ActionRowBuilder().addComponents(url));
+  return modal;
+}
+
 function buildApplicationModal(section) {
   const modal = new ModalBuilder()
     .setCustomId(modalCustomId("family_application", section))
@@ -2019,6 +2081,27 @@ async function processExpiredGameAfkSessions(clientInstance) {
   }
 }
 
+async function processCaptReplayExpiry(clientInstance) {
+  const window = getCaptReplayWindow();
+  if (!window.isOpen) return;
+  const expiresAt = captReplayWindowExpiresAt(window);
+  if (expiresAt === null || Date.now() < expiresAt) return;
+
+  await saveCaptReplayWindow({ ...window, isOpen: false });
+  const guild = await clientInstance.guilds.fetch(process.env.DISCORD_GUILD_ID).catch(() => null);
+  if (!guild) return;
+  await refreshStaticPanel(
+    guild,
+    CAPT_REPLAY_CHANNEL_ID,
+    "capt_replay:upload",
+    () => buildCaptReplayPanel(getCaptReplayWindow())
+  );
+  await sendLog(guild, new EmbedBuilder()
+    .setColor(0xf2c94c)
+    .setTitle("Приём откатов CAPT закрыт автоматически")
+    .setDescription("Истекло время окна приёма откатов (1 час 30 минут)."));
+}
+
 function buildSupportTicketMessagePayload(ticket, user) {
   const statusLabels = {
     new: "Новая",
@@ -2291,6 +2374,12 @@ async function handleClientReady(readyClient) {
     }
     await refreshStaticPanel(guild, SUPPORT_PANEL_CHANNEL_ID, "support:create", buildSupportPanel);
     await refreshStaticPanel(guild, ADMIN_PANEL_CHANNEL_ID, "admin:warn", buildAdminPanel);
+    await refreshStaticPanel(
+      guild,
+      CAPT_REPLAY_CHANNEL_ID,
+      "capt_replay:upload",
+      () => buildCaptReplayPanel(getCaptReplayWindow())
+    );
     await syncGuildStateFromRoles(guild);
     await synchronizeStoredTicketThreads(guild);
   }
@@ -2300,6 +2389,13 @@ async function handleClientReady(readyClient) {
     });
   }, GAME_AFK_SWEEP_INTERVAL_MS);
   gameAfkSweep.unref?.();
+
+  const captReplaySweep = setInterval(() => {
+    processCaptReplayExpiry(readyClient).catch((error) => {
+      console.error("Failed to process capt replay window expiry:", error);
+    });
+  }, CAPT_REPLAY_SWEEP_INTERVAL_MS);
+  captReplaySweep.unref?.();
 
   // Periodically (rather than before every single interaction) pick up data changed
   // directly in the database, so manual edits still apply without a restart but without
@@ -2948,7 +3044,7 @@ async function handleInteraction(interaction) {
   if (interaction.isChatInputCommand()) {
     const commandName = interaction.commandName;
 
-    if (["info", "move"].includes(commandName) && !isLeadership(interaction.member)) {
+    if (["info", "move", "capts"].includes(commandName) && !isLeadership(interaction.member)) {
       await interaction.reply({ content: noticeMessage("Эту команду может использовать только руководство фамы."), flags: MessageFlags.Ephemeral });
       return;
     }
@@ -3028,6 +3124,38 @@ async function handleInteraction(interaction) {
 
     if (commandName === "info") {
       await interaction.reply({ ...buildInfoMenu(), flags: MessageFlags.Ephemeral });
+      return;
+    }
+
+    if (commandName === "capts") {
+      const window = getCaptReplayWindow();
+      const nextOpen = !isCaptReplayWindowOpen(window);
+      const nextWindow = {
+        isOpen: nextOpen,
+        openedAt: nextOpen ? new Date().toISOString() : window.openedAt,
+        openedBy: nextOpen ? interaction.user.id : window.openedBy
+      };
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+      await saveCaptReplayWindow(nextWindow);
+      await refreshStaticPanel(
+        interaction.guild,
+        CAPT_REPLAY_CHANNEL_ID,
+        "capt_replay:upload",
+        () => buildCaptReplayPanel(getCaptReplayWindow())
+      );
+      const expiresAt = captReplayWindowExpiresAt(nextWindow);
+      await sendLog(
+        interaction.guild,
+        new EmbedBuilder()
+          .setColor(nextOpen ? 0x27ae60 : 0xeb5757)
+          .setTitle(`Приём откатов CAPT ${nextOpen ? "открыт" : "закрыт"}`)
+          .setDescription(`<@${interaction.user.id}> ${nextOpen ? "открыл" : "закрыл"} приём откатов.`)
+      );
+      await interaction.editReply({
+        content: nextOpen
+          ? successMessage(`Приём откатов открыт до ${discordTimestampFromMs(expiresAt)}.`)
+          : successMessage("Приём откатов закрыт.")
+      });
       return;
     }
 
@@ -3381,6 +3509,44 @@ async function handleInteraction(interaction) {
       return;
     }
     await interaction.editReply(buildGameAfkPanel(sessions));
+    return;
+  }
+
+  if (interaction.isButton() && interaction.customId === "capt_replay:upload") {
+    const window = getCaptReplayWindow();
+    if (!isCaptReplayWindowOpen(window)) {
+      await interaction.reply({ content: noticeMessage("Приём откатов сейчас закрыт."), flags: MessageFlags.Ephemeral });
+      return;
+    }
+    await interaction.showModal(buildCaptReplayModal());
+    return;
+  }
+
+  if (interaction.isModalSubmit() && interaction.customId.startsWith("capt_replay:submit:")) {
+    const window = getCaptReplayWindow();
+    if (!isCaptReplayWindowOpen(window)) {
+      await interaction.reply({ content: noticeMessage("Приём откатов уже закрыт."), flags: MessageFlags.Ephemeral });
+      return;
+    }
+    const rawUrl = interaction.fields.getTextInputValue("url").trim();
+    const parsedUrl = parseYoutubeUrl(rawUrl);
+    if (!parsedUrl) {
+      await interaction.reply({ content: errorMessage("Укажите корректную ссылку на YouTube."), flags: MessageFlags.Ephemeral });
+      return;
+    }
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    const channel = await interaction.guild.channels.fetch(CAPT_REPLAY_CHANNEL_ID).catch(() => null);
+    if (channel?.isTextBased()) {
+      await channel.send({
+        embeds: [new EmbedBuilder()
+          .setColor(0x79040c)
+          .setTitle("Новый откат CAPT")
+          .setDescription(`Отправитель: <@${interaction.user.id}>\nСсылка: ${rawUrl}`)
+          .setTimestamp()],
+        allowedMentions: { parse: [], users: [], roles: [] }
+      }).catch(() => null);
+    }
+    await interaction.editReply({ content: successMessage("Откат отправлен!") });
     return;
   }
 
