@@ -1189,8 +1189,12 @@ function buildInfoMenu() {
   };
 }
 
-function rankDisplayName(rank) {
-  if (rank === 8) return "High Staff";
+function rankDisplayName(rank, member = null) {
+  if (rank === 8) {
+    const manualRoleId = rankRoleIdsFor(8)[1];
+    const hasManualRole = manualRoleId && member?.roles?.cache?.has(manualRoleId);
+    return hasManualRole ? "High Staff (Administrator)" : "High Staff";
+  }
   if (rank === 9) return "Deputy Leader";
   if (rank === 10) return "Leader";
   return rank ? String(rank) : "Не в фаме";
@@ -2262,14 +2266,14 @@ async function sendLog(guild, embed) {
   }
 }
 
-function memberEmbed(user, rank, warnCount) {
+function memberEmbed(user, rank, warnCount, member = null) {
   const embed = new EmbedBuilder()
     .setColor(0x79040c)
     .setTitle(`Профиль: ${user.username}`)
     .setThumbnail(user.displayAvatarURL())
     .addFields(
       { name: "Discord", value: `<@${user.id}>`, inline: true },
-      { name: "Ранг", value: rankDisplayName(rank), inline: true },
+      { name: "Ранг", value: rankDisplayName(rank, member), inline: true },
       { name: "Варны", value: String(warnCount), inline: true }
     );
   if (!isMpPointsExcludedRank(rank)) {
@@ -3295,7 +3299,7 @@ async function handleInteraction(interaction) {
     const rank = getRankFromMemberRoles(member);
     const warnCount = await syncWarningsFromMemberRoles(member);
     await interaction.editReply(embedToComponentPayload(
-      memberEmbed(target, rank, warnCount),
+      memberEmbed(target, rank, warnCount, member),
       [profileButtons(ownerId, targetId, rank)]
     ));
     return;
@@ -3368,7 +3372,7 @@ async function handleInteraction(interaction) {
     const rank = getRankFromMemberRoles(member);
     const warnCount = await syncWarningsFromMemberRoles(member);
     await interaction.editReply(embedToComponentPayload(
-      memberEmbed(interaction.user, rank, warnCount),
+      memberEmbed(interaction.user, rank, warnCount, member),
       [profileButtons(interaction.user.id, interaction.user.id, rank)]
     ));
     return;
@@ -3464,7 +3468,7 @@ async function handleInteraction(interaction) {
     if (system === "profile") {
       const rank = getRankFromMemberRoles(target);
       const warnCount = await syncWarningsFromMemberRoles(target);
-      await interaction.editReply(embedToComponentPayload(memberEmbed(target.user, rank, warnCount), [profileButtons(interaction.user.id, target.id, rank)]));
+      await interaction.editReply(embedToComponentPayload(memberEmbed(target.user, rank, warnCount, target), [profileButtons(interaction.user.id, target.id, rank)]));
       return;
     }
     if (action === "history") {
