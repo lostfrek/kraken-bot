@@ -23,5 +23,6 @@
   "notice": { "id": "1533859705129144350", "name": "notice", "animated": false },
   "pending": { "id": "1533878658362773538", "name": "pending", "animated": false },
   "menu": { "id": "1533885656248487976", "name": "menu", "animated": false },
-  "recruitment": { "id": "1536033730626326568", "name": "recruitment", "animated": false }
+  "recruitment": { "id": "1536033730626326568", "name": "recruitment", "animated": false },
+  "disk": { "id": "1541398160021131386", "name": "disk", "animated": false }
 }

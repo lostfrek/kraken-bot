@@ -1779,7 +1779,7 @@ function buildCaptReplayPanel(window) {
     new ButtonBuilder()
       .setCustomId("capt_replay:upload")
       .setLabel("Загрузить откат")
-      .setEmoji(applicationEmoji("create_ticket"))
+      .setEmoji(applicationEmoji("disk"))
       .setStyle(ButtonStyle.Secondary)
   );
   return { content: null, embeds: [embed], components: [row] };
