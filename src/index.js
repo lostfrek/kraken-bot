@@ -811,7 +811,7 @@ function locatePhoneParticipantRows(raw, width, height, channels) {
     if (!last || y - last.end > 4) groups.push({ start: y, end: y });
     else last.end = y;
   }
-  const minHeight = Math.max(14, Math.floor(height * 0.018));
+  const minHeight = Math.max(4, Math.floor(height * 0.004));
   const maxHeight = Math.floor(height * 0.10);
   return groups
     .filter((group) => group.end - group.start + 1 >= minHeight && group.end - group.start + 1 <= maxHeight)
@@ -849,8 +849,10 @@ async function recognizeGreenNames(imageBuffer) {
     const remainingWidth = info.width - rowInfo.anchorX;
     const left = Math.min(info.width - 1, rowInfo.anchorX + Math.floor(remainingWidth * 0.16));
     const width = Math.min(Math.floor(remainingWidth * 0.58), info.width - left);
-    const top = Math.max(0, rowInfo.start - Math.floor(info.height * 0.004));
-    const height = Math.min(rowInfo.end - rowInfo.start + 1 + Math.floor(info.height * 0.008), info.height - top);
+    const top = Math.max(0, rowInfo.start - Math.floor(info.height * 0.007));
+    const markerHeight = rowInfo.end - rowInfo.start + 1 + Math.floor(info.height * 0.008);
+    const minRowTextHeight = Math.floor(info.height * 0.042);
+    const height = Math.min(Math.max(markerHeight, minRowTextHeight), info.height - top);
     if (height < 10 || width < 10) continue;
     const row = await sharp(imageBufferNormalized)
       .extract({ left, top, width, height })
