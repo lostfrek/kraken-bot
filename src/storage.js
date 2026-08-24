@@ -701,9 +701,9 @@ function saveMpRequests(requests) {
           await connection.execute(
             `INSERT INTO mp_point_transactions
              (batch_id, user_id, participant_name, transaction_type, status,
-              requested_amount, event_type, event_label, submitted_by, reviewed_by,
+              requested_amount, applied_amount, event_type, event_label, submitted_by, reviewed_by,
               source_url, created_at, reviewed_at, request_data)
-             VALUES (?, ?, ?, 'request', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+             VALUES (?, ?, ?, 'request', ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?)`,
             [
               requestId, participant.userId, participant.name,
               ["pending", "approved", "rejected", "cancelled"].includes(request.status)
