@@ -1196,39 +1196,43 @@ function buildInfoMenu() {
   };
 }
 
+function memberHasRank8ManualRole(member) {
+  const manualRoleId = rankRoleIdsFor(8)[1];
+  return Boolean(manualRoleId && member?.roles?.cache?.has(manualRoleId));
+}
+
 function rankDisplayName(rank, member = null) {
   if (rank === 8) {
-    const manualRoleId = rankRoleIdsFor(8)[1];
-    const hasManualRole = manualRoleId && member?.roles?.cache?.has(manualRoleId);
-    return hasManualRole ? "High Staff (Administrator)" : "High Staff";
+    return memberHasRank8ManualRole(member) ? "High-Staff (Administrator)" : "High-Staff";
   }
   if (rank === 9) return "Deputy Leader";
   if (rank === 10) return "Leader";
   return rank ? String(rank) : "Не в фаме";
 }
 
-function rankNicknamePrefix(rank) {
+function rankNicknamePrefix(rank, member = null) {
+  if (rank === 8) return memberHasRank8ManualRole(member) ? "Admin" : "High";
   if (rank === 9) return "Deputy";
   if (rank === 10) return "Leader";
   return String(rank);
 }
 
-function formatFamilyNickname(rank, icName, staticId) {
+function formatFamilyNickname(rank, icName, staticId, member = null) {
   const normalizedName = String(icName ?? "").trim();
   const normalizedStaticId = String(staticId ?? "").trim();
   if (!rank || !normalizedName || !normalizedStaticId) return null;
-  const prefix = `${rankNicknamePrefix(rank)} | `;
+  const prefix = `${rankNicknamePrefix(rank, member)} | `;
   const suffix = ` | ${normalizedStaticId}`;
   const availableNameLength = 32 - prefix.length - suffix.length;
   if (availableNameLength < 1) return null;
   return `${prefix}${normalizedName.slice(0, availableNameLength).trim()}${suffix}`;
 }
 
-function buildFamilyNickname(rank, characterInfo) {
+function buildFamilyNickname(rank, characterInfo, member = null) {
   const [icName, , staticId] = String(characterInfo ?? "")
     .split("/")
     .map((part) => part.trim());
-  return formatFamilyNickname(rank, icName, staticId);
+  return formatFamilyNickname(rank, icName, staticId, member);
 }
 
 function memberNicknameIdentity(member) {
@@ -1251,7 +1255,7 @@ function memberNicknameIdentity(member) {
 async function syncMemberRankNickname(member, rank) {
   const identity = memberNicknameIdentity(member);
   if (!identity) return null;
-  const nickname = formatFamilyNickname(rank, identity.icName, identity.staticId);
+  const nickname = formatFamilyNickname(rank, identity.icName, identity.staticId, member);
   if (!nickname) throw new Error("Не удалось сформировать никнейм участника.");
   if (member.nickname !== nickname) {
     await member.setNickname(nickname, `Синхронизация никнейма с ${rank} рангом`);
@@ -2947,7 +2951,16 @@ client.on(Events.GuildMemberAdd, (member) => {
 async function handleGuildMemberUpdate(oldMember, newMember) {
   const oldRank = getRankFromMemberRoles(oldMember);
   const newRank = getRankFromMemberRoles(newMember);
-  if (oldRank === newRank) return;
+  if (oldRank === newRank) {
+    if (newRank === 8 && memberHasRank8ManualRole(oldMember) !== memberHasRank8ManualRole(newMember)) {
+      // Toggling the manual Administrator role doesn't change the numeric rank (both
+      // roles count as 8), but it does change the "High" / "Admin" nickname prefix.
+      await syncMemberRankNickname(newMember, newRank).catch((error) => {
+        console.error(`Failed to synchronize nickname for ${newMember.id}:`, error);
+      });
+    }
+    return;
+  }
   if ((botRankChanges.get(newMember.id) ?? 0) > Date.now()) return;
   await reloadStorage();
 
@@ -3732,7 +3745,7 @@ async function handleInteraction(interaction) {
     await interaction.editReply({ content: loadingMessage("Пожалуйста, подождите, изменения применяются...") });
 
     if (system === "rank") {
-      const rankOrder = [1, 2, 3, 5, 6, 7, 8, 9, 10];
+      const rankOrder = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
       const completed = [];
       const failed = [];
       const logLines = [];
