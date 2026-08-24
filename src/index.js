@@ -1774,12 +1774,13 @@ function buildCaptReplayPanel(window) {
         ? `**Приём открыт до ${discordTimestampFromMs(expiresAt)}.**`
         : "**Приём сейчас закрыт.**")
     );
+  if (!open) return { content: null, embeds: [embed], components: [] };
   const row = new ActionRowBuilder().addComponents(
     new ButtonBuilder()
       .setCustomId("capt_replay:upload")
       .setLabel("Загрузить откат")
+      .setEmoji(applicationEmoji("create_ticket"))
       .setStyle(ButtonStyle.Secondary)
-      .setDisabled(!open)
   );
   return { content: null, embeds: [embed], components: [row] };
 }
@@ -3474,7 +3475,7 @@ async function handleInteraction(interaction) {
       const targetMember = interaction.guild.members.cache.get(targetId)
         ?? await interaction.guild.members.fetch(targetId).catch(() => null);
       if (isMpPointsExcludedMember(targetMember)) {
-        await interaction.editReply({ content: noticeMessage("Для участников 8 ранга и выше учёт баллов МП отключён."), components: [] });
+        await interaction.editReply({ content: noticeMessage("Для участников 7 ранга и выше учёт баллов МП отключён."), components: [] });
         return;
       }
     } else {
