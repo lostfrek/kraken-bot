@@ -243,7 +243,7 @@ const STORAGE_RELOAD_INTERVAL_MS = 60 * 1000;
 const GAME_AFK_MAX_HOURS = 4;
 const MP_REPORT_CHANNEL_ID = "1315852973368152155";
 const MP_REPORT_REVIEWER_ID = "629552401237540874";
-const MP_EXCLUDED_MIN_RANK = 8;
+const MP_EXCLUDED_MIN_RANK = 7;
 const MP_EVENT_TYPES = [
   { key: "construction", label: "Подставная стройка", points: 5, aliases: ["подставная стройка", "стройка"] },
   { key: "grover", label: "Гровер", points: 15, aliases: ["гровер"] },
@@ -260,10 +260,10 @@ const WARN_ROLE_IDS = {
 const botRankChanges = new Map();
 const PROMOTION_REQUIREMENTS = {
   2: { nextRank: 3, points: 75 },
-  3: { nextRank: 5, points: 150 },
-  5: { nextRank: 6, points: 300 },
-  6: { nextRank: 7, points: 450 },
-  7: { nextRank: 8, points: 600 }
+  3: { nextRank: 4, points: 150 },
+  4: { nextRank: 5, points: 300 },
+  5: { nextRank: 6, points: 450 },
+  6: { nextRank: 7, points: 600 }
 };
 let ocrWorkerPromise;
 let ocrQueue = Promise.resolve();
@@ -1599,7 +1599,7 @@ function buildAdminSection(section) {
     new ButtonBuilder().setCustomId("admin_action:rank:add").setLabel("Повысить").setEmoji(applicationEmoji("add")).setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId("admin_action:rank:remove").setLabel("Понизить").setEmoji(applicationEmoji("remove")).setStyle(ButtonStyle.Secondary)
   ) };
-  if (section === "mp") return { embed: embed.setTitle("Система MP-баллов").setDescription("Начисляйте или списывайте одинаковое количество баллов сразу у группы до 10 участников. MP-баллы доступны только участникам со 2-го по 7-й ранг. Результат каждой операции доступен в профиле участника."), row: new ActionRowBuilder().addComponents(
+  if (section === "mp") return { embed: embed.setTitle("Система MP-баллов").setDescription("Начисляйте или списывайте одинаковое количество баллов сразу у группы до 10 участников. MP-баллы доступны только участникам со 2-го по 6-й ранг. Результат каждой операции доступен в профиле участника."), row: new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId("admin_action:mp:add").setLabel("Добавить").setEmoji(applicationEmoji("add")).setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId("admin_action:mp:remove").setLabel("Списать").setEmoji(applicationEmoji("remove")).setStyle(ButtonStyle.Secondary)
   ) };
@@ -3778,7 +3778,7 @@ async function handleInteraction(interaction) {
       const failed = [];
       for (const member of members) {
         if (isMpPointsExcludedMember(member)) {
-          failed.push(`<@${member.id}> — MP-баллы доступны только участникам со 2-го по 7-й ранг`);
+          failed.push(`<@${member.id}> — MP-баллы доступны только участникам со 2-го по 6-й ранг`);
           continue;
         }
         const changed = await changeMpBalance(member.id, action === "add" ? amount : -amount, interaction.user.id, reason, member);
