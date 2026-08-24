@@ -1760,10 +1760,13 @@ function buildCaptReplayPanel(window) {
   const expiresAt = captReplayWindowExpiresAt(window);
   const embed = new EmbedBuilder()
     .setColor(0x79040c)
+    .setURL("https://kraken.internal/panel?c=capt_replay:upload")
     .setDescription(
       "### Как это работает\n" +
       "• Приём откатов открывается на **90 минут**.\n" +
-      "• Пока приём открыт, кнопка «Загрузить откат» ниже активна — нажмите её и пришлите ссылку.\n" +
+      (open
+        ? "• Пока приём открыт, кнопка «Загрузить откат» ниже активна — нажмите её и пришлите ссылку.\n"
+        : "• Пока приём открыт, здесь появляется кнопка «Загрузить откат» — нажмите её и пришлите ссылку.\n") +
       "• Ссылка должна вести на **YouTube** (youtube.com или youtu.be), другие сайты не принимаются.\n" +
       "• За одно открытие каждый участник может отправить **только один откат** — повторная " +
       "отправка в это же окно будет отклонена.\n\n" +
@@ -2065,7 +2068,8 @@ async function refreshStaticPanel(guild, channelId, componentId, payloadBuilder)
   const messages = await channel.messages.fetch({ limit: 100 }).catch(() => null);
   const current = messages?.find((message) =>
     message.author.id === guild.client.user.id &&
-    JSON.stringify(message.components).includes(componentId)
+    (JSON.stringify(message.components).includes(componentId) ||
+      JSON.stringify(message.embeds).includes(componentId))
   );
   if (current) {
     const updated = await current.edit(payloadBuilder()).catch(() => null);
