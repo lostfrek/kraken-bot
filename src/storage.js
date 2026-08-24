@@ -3,7 +3,6 @@ const path = require("node:path");
 const mysql = require("mysql2/promise");
 
 const ROOT = path.join(__dirname, "..");
-const CERT_PATH = path.join(ROOT, "ca_mysql.crt");
 
 const state = {
   applications: {},

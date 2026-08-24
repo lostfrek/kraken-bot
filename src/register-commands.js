@@ -29,7 +29,7 @@ const commands = [
 
   new SlashCommandBuilder()
     .setName("capts")
-    .setDescription("Открыть или закрыть приём откатов CAPT на 1 час 30 минут.")
+    .setDescription("Открыть или закрыть приём откатов с капта на 90 минут.")
     .setDefaultMemberPermissions(PermissionFlagsBits.ManageRoles)
 ].map((command) => command.toJSON());
 
