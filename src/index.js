@@ -283,7 +283,7 @@ function isSupportReviewer(member) {
 }
 
 function applicationSectionLabel(section) {
-  return section === "capt" ? "CAPT-состав" : "RP-состав";
+  return section === "capt" ? "Капт-состав" : "RP-состав";
 }
 
 async function fetchOrlandoOnline() {
@@ -1003,7 +1003,7 @@ async function matchMpNamesToMembers(guild, names) {
       }
     }
     const rank = getRankFromMemberRoles(member);
-    return { member, values, eligible: rank !== null && rank >= 2 && rank <= 7 };
+    return { member, values, eligible: !isMpPointsExcludedRank(rank) };
   });
   const matched = [];
   const unmatched = [];
@@ -1024,7 +1024,7 @@ async function matchMpNamesToMembers(guild, names) {
     } else if (!candidates.length) {
       unmatched.push(name);
     }
-    // Участники 1-го, 8-го и более высоких рангов намеренно полностью пропускаются.
+    // Участники 1-го, 7-го и более высоких рангов намеренно полностью пропускаются.
   }
   const uniqueMatched = [...new Map(matched.map((entry) => [entry.userId, entry])).values()];
   return { matched: uniqueMatched, unmatched: [...new Set(unmatched)] };
@@ -1042,7 +1042,7 @@ async function getAfkMembers(guild) {
     if (member.user.bot) continue;
 
     const rank = getRankFromMemberRoles(member);
-    if (rank === null || rank < 1 || rank > 7 || rank === 4) continue;
+    if (isMpPointsExcludedRank(rank)) continue;
 
     if (!mpPoints[member.id]) {
       inactiveMembers.push({ member, rank });
@@ -1425,7 +1425,7 @@ function buildApplicationPanel() {
   const recruitmentStatus = !captOpen && !rpOpen
     ? `### Статус набора\n${applicationEmojiMention("lock")} Набор в оба состава закрыт`
     : `### Статус набора\n` +
-      `**CAPT-состав:** ${status(captOpen)}\n` +
+      `**Капт-состав:** ${status(captOpen)}\n` +
       `**RP-состав:** ${status(rpOpen)}`;
 
   const select = new StringSelectMenuBuilder()
@@ -1433,7 +1433,7 @@ function buildApplicationPanel() {
     .setPlaceholder("Подать заявку");
   if (captOpen) {
     select.addOptions({
-        label: "Заявка в CAPT-состав",
+        label: "Заявка в Капт-состав",
         description: "ORLANDO / RU18",
         emoji: applicationEmoji("number_1"),
         value: "capt"
@@ -1579,7 +1579,7 @@ function buildAdminSection(section) {
   if (section === "warn") {
     embed
       .setTitle("Система варнов")
-      .setDescription("Выберите действие кнопкой ниже. Можно указать до 10 участников через пробел или с новой строки. При третьем активном варне участник исключается с Discord-сервера.")
+      .setDescription("Выберите действие кнопкой ниже. Можно указать до 10 участников через пробел или с новой строки. При третьем активном варне с участника снимаются все роли на Discord-сервере.")
       .addFields({
         name: "Доступные наказания для снятия варна",
         value: [
@@ -4448,7 +4448,7 @@ async function handleInteraction(interaction) {
         }
         const member = candidates[0];
         if (isMpPointsExcludedMember(member)) {
-          notFound.push(`${term} (8 ранг или выше)`);
+          notFound.push(`${term} (7 ранг или выше)`);
           continue;
         }
         if (!request.matched.some((entry) => entry.userId === member.id)) {
