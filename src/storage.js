@@ -338,6 +338,11 @@ function getRankHistory() { return state.ranks; }
 function getMpRequests() { return state.mpRequests; }
 function getSupportTickets() { return state.supportTickets; }
 
+async function hasProcessedAnyFamilyWarsCapture() {
+  const [rows] = await pool.query("SELECT 1 FROM family_wars_processed_captures LIMIT 1");
+  return rows.length > 0;
+}
+
 async function tryClaimFamilyWarsCapture(captureId) {
   const [result] = await pool.execute(
     "INSERT IGNORE INTO family_wars_processed_captures (capture_id) VALUES (?)",
@@ -830,6 +835,7 @@ module.exports = {
   getSupportTickets,
   getUserDb,
   getWarnings,
+  hasProcessedAnyFamilyWarsCapture,
   initStorage,
   reloadStorage,
   removeGameAfkSession,

@@ -47,6 +47,7 @@ const {
   getSupportTickets,
   getUserDb,
   getWarnings,
+  hasProcessedAnyFamilyWarsCapture,
   initStorage,
   reloadStorage,
   removeGameAfkSession,
@@ -1034,13 +1035,13 @@ async function matchMpNamesToMembers(guild, names) {
 }
 
 async function fetchFamilyWarsCaptures() {
-  if (!process.env.MAJESTIC_FAMILY_WARS_API_KEY) {
-    throw new Error("Не задана переменная окружения MAJESTIC_FAMILY_WARS_API_KEY");
+  if (!process.env.MAJESTIC_API_KEY) {
+    throw new Error("Не задана переменная окружения MAJESTIC_API_KEY");
   }
   const response = await fetch(MAJESTIC_FAMILY_WARS_API_URL, {
     headers: {
       "User-Agent": "Kraken-Discord-Bot/1.0",
-      "x-api-key": process.env.MAJESTIC_FAMILY_WARS_API_KEY
+      "x-api-key": process.env.MAJESTIC_API_KEY
     },
     signal: AbortSignal.timeout(10000)
   });
@@ -1130,6 +1131,19 @@ async function syncFamilyWarsCaptures(readyClient) {
     return;
   }
 
+  // При самом первом опросе (таблица обработанных каптов ещё пуста) API может
+  // вернуть уже старую историю каптов — часть из них наверняка уже была
+  // отписана вручную раньше. Чтобы не задвоить баллы, в этом случае только
+  // помечаем всё увиденное как обработанное, без начисления; по-настоящему
+  // новые капты начнут начисляться со следующего опроса.
+  let isBootstrap;
+  try {
+    isBootstrap = !(await hasProcessedAnyFamilyWarsCapture());
+  } catch (error) {
+    console.error("Failed to check family-wars bootstrap state:", error);
+    return;
+  }
+
   for (const capture of captures) {
     if (capture.status !== "finished" || capture.id == null || capture.winner == null) continue;
     const ownFamilyId = resolveOwnFamilyId(capture);
@@ -1139,13 +1153,20 @@ async function syncFamilyWarsCaptures(readyClient) {
       console.error(`Failed to claim family-wars capture ${capture.id}:`, error);
       return false;
     });
-    if (!claimed) continue;
+    if (!claimed || isBootstrap) continue;
 
     try {
       await awardFamilyWarsCapture(guild, capture, ownFamilyId);
     } catch (error) {
       console.error(`Failed to process family-wars capture ${capture.id}:`, error);
     }
+  }
+
+  if (isBootstrap) {
+    await sendLog(guild, new EmbedBuilder()
+      .setColor(0x56ccf2)
+      .setTitle("Автоначисление МП за капты: первый запуск")
+      .setDescription("Существующая история каптов из Majestic API отмечена как уже известная, без начисления баллов. Начисление начнётся с новых каптов, которые появятся после этого момента."));
   }
 }
 
