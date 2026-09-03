@@ -1034,8 +1034,14 @@ async function matchMpNamesToMembers(guild, names) {
 }
 
 async function fetchFamilyWarsCaptures() {
+  if (!process.env.MAJESTIC_FAMILY_WARS_API_KEY) {
+    throw new Error("Не задана переменная окружения MAJESTIC_FAMILY_WARS_API_KEY");
+  }
   const response = await fetch(MAJESTIC_FAMILY_WARS_API_URL, {
-    headers: { "User-Agent": "Kraken-Discord-Bot/1.0" },
+    headers: {
+      "User-Agent": "Kraken-Discord-Bot/1.0",
+      "x-api-key": process.env.MAJESTIC_FAMILY_WARS_API_KEY
+    },
     signal: AbortSignal.timeout(10000)
   });
   if (!response.ok) {
