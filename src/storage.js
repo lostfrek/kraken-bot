@@ -338,6 +338,14 @@ function getRankHistory() { return state.ranks; }
 function getMpRequests() { return state.mpRequests; }
 function getSupportTickets() { return state.supportTickets; }
 
+async function tryClaimFamilyWarsCapture(captureId) {
+  const [result] = await pool.execute(
+    "INSERT IGNORE INTO family_wars_processed_captures (capture_id) VALUES (?)",
+    [captureId]
+  );
+  return result.affectedRows > 0;
+}
+
 async function getActiveGameAfkSessions() {
   const [rows] = await pool.query(
     `SELECT user_id, reason, started_at, expires_at
@@ -836,5 +844,6 @@ module.exports = {
   saveUserDb,
   saveWarnings,
   syncUserProfile,
-  takeExpiredGameAfkSessions
+  takeExpiredGameAfkSessions,
+  tryClaimFamilyWarsCapture
 };
