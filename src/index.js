@@ -1049,10 +1049,11 @@ async function fetchFamilyWarsCaptures() {
     throw new Error(`Majestic family-wars API returned ${response.status}`);
   }
   const payload = await response.json();
-  if (!Array.isArray(payload?.captures)) {
-    throw new Error("Majestic family-wars API response has no captures list");
+  const captures = Array.isArray(payload?.captures) ? payload.captures : payload?.data?.captures;
+  if (!Array.isArray(captures)) {
+    throw new Error(`Majestic family-wars API response has no captures list: ${JSON.stringify(payload).slice(0, 500)}`);
   }
-  return payload.captures;
+  return captures;
 }
 
 // Определяем ID нашей семьи по названию прямо в ответе API — оно не задано в конфиге
