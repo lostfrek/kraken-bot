@@ -47,6 +47,7 @@ const {
   getSupportTickets,
   getUserDb,
   getWarnings,
+  hasProcessedAnyFamilyWarsCapture,
   initStorage,
   reloadStorage,
   removeGameAfkSession,
@@ -61,7 +62,8 @@ const {
   saveUserDb,
   saveWarnings,
   syncUserProfile,
-  takeExpiredGameAfkSessions
+  takeExpiredGameAfkSessions,
+  tryClaimFamilyWarsCapture
 } = require("./storage");
 
 const configPath = path.join(__dirname, "..", "config.json");
@@ -237,6 +239,8 @@ const SUPPORT_REQUEST_TYPES = {
   other: "Другое"
 };
 const MAJESTIC_ONLINE_API_URL = "https://wiki.majestic-rp.ru/api/online";
+const MAJESTIC_FAMILY_WARS_API_URL = `https://api.majestic-files.net/v1/ext/family-wars/${config.majesticServerId}`;
+const FAMILY_WARS_POLL_INTERVAL_MS = 5 * 60 * 1000;
 const BOT_STATUS_UPDATE_INTERVAL_MS = 30 * 1000;
 const GAME_AFK_SWEEP_INTERVAL_MS = 30 * 1000;
 const STORAGE_RELOAD_INTERVAL_MS = 60 * 1000;
@@ -1028,6 +1032,142 @@ async function matchMpNamesToMembers(guild, names) {
   }
   const uniqueMatched = [...new Map(matched.map((entry) => [entry.userId, entry])).values()];
   return { matched: uniqueMatched, unmatched: [...new Set(unmatched)] };
+}
+
+async function fetchFamilyWarsCaptures() {
+  if (!process.env.MAJESTIC_API_KEY) {
+    throw new Error("Не задана переменная окружения MAJESTIC_API_KEY");
+  }
+  const response = await fetch(MAJESTIC_FAMILY_WARS_API_URL, {
+    headers: {
+      "User-Agent": "Kraken-Discord-Bot/1.0",
+      "x-api-key": process.env.MAJESTIC_API_KEY
+    },
+    signal: AbortSignal.timeout(10000)
+  });
+  if (!response.ok) {
+    throw new Error(`Majestic family-wars API returned ${response.status}`);
+  }
+  const payload = await response.json();
+  if (!Array.isArray(payload?.captures)) {
+    throw new Error("Majestic family-wars API response has no captures list");
+  }
+  return payload.captures;
+}
+
+// Определяем ID нашей семьи по названию прямо в ответе API — оно не задано в конфиге
+// заранее и не должно жёстко зашиваться в код, так как Majestic его нигде не публикует.
+function resolveOwnFamilyId(capture) {
+  const ownName = config.familyName?.trim().toLowerCase();
+  if (!ownName) return null;
+  if (capture.defendersName?.trim().toLowerCase() === ownName) return capture.defendersId;
+  if (capture.attackersName?.trim().toLowerCase() === ownName) return capture.attackersId;
+  return null;
+}
+
+async function awardFamilyWarsCapture(guild, capture, ownFamilyId) {
+  const won = capture.winner === ownFamilyId;
+  const event = MP_EVENT_TYPES.find((entry) => entry.key === (won ? "capture_win" : "capture_loss"));
+  const opponentName = ownFamilyId === capture.defendersId ? capture.attackersName : capture.defendersName;
+  const captureLabel = `${capture.selectedMapName ?? "неизвестная карта"} vs ${opponentName ?? "неизвестная семья"}`;
+  const names = (capture.players?.[String(ownFamilyId)] ?? []).map((player) => player.name).filter(Boolean);
+
+  if (!event || !names.length) {
+    await sendLog(guild, new EmbedBuilder()
+      .setColor(0xf2c94c)
+      .setTitle("Захват территории: нет участников для начисления")
+      .setDescription(`Капт **${captureLabel}** (ID ${capture.id}) обработан без начисления — участники нашей семьи не найдены в ответе API.`));
+    return;
+  }
+
+  const { matched, unmatched } = await matchMpNamesToMembers(guild, names);
+  const awardedLines = [];
+  for (const entry of matched) {
+    const member = await guild.members.fetch(entry.userId).catch(() => null);
+    if (!member || isMpPointsExcludedMember(member)) continue;
+    const result = await changeMpBalance(
+      entry.userId,
+      event.points,
+      "system",
+      `Автоматическое начисление: ${event.label} (${captureLabel})`,
+      member
+    );
+    awardedLines.push(`<@${entry.userId}> — начислено **${event.points}**, баланс: **${result.balance}**`);
+    const user = await guild.client.users.fetch(entry.userId).catch(() => null);
+    await dmUserEmbed(user, new EmbedBuilder()
+      .setColor(0x27ae60)
+      .setTitle("Начислены баллы МП")
+      .setDescription(`За **${event.label}** вам автоматически начислено **${event.points} баллов МП**.\nКапт: ${captureLabel}`)
+      .addFields({ name: "Текущий баланс", value: String(result.balance), inline: true }));
+  }
+
+  const embed = new EmbedBuilder()
+    .setColor(won ? 0x27ae60 : 0xeb5757)
+    .setTitle(`Автоначисление МП: ${event.label}`)
+    .setDescription(`Капт **${captureLabel}** (ID ${capture.id}) обработан автоматически по данным Majestic API.`)
+    .addFields(
+      { name: "Начислено участникам", value: String(awardedLines.length), inline: true },
+      { name: "Баллов каждому", value: String(event.points), inline: true }
+    );
+  if (awardedLines.length) {
+    embed.addFields({ name: "Кому начислено", value: awardedLines.join("\n").slice(0, 1024) });
+  }
+  if (unmatched.length) {
+    embed.addFields({ name: "Не сопоставлены с участниками сервера", value: unmatched.join(", ").slice(0, 1024) });
+  }
+  await sendLog(guild, embed);
+}
+
+async function syncFamilyWarsCaptures(readyClient) {
+  const guildId = process.env.DISCORD_GUILD_ID;
+  const guild = guildId ? await readyClient.guilds.fetch(guildId).catch(() => null) : null;
+  if (!guild) return;
+
+  let captures;
+  try {
+    captures = await fetchFamilyWarsCaptures();
+  } catch (error) {
+    console.error("Failed to fetch Majestic family-wars captures:", error);
+    return;
+  }
+
+  // При самом первом опросе (таблица обработанных каптов ещё пуста) API может
+  // вернуть уже старую историю каптов — часть из них наверняка уже была
+  // отписана вручную раньше. Чтобы не задвоить баллы, в этом случае только
+  // помечаем всё увиденное как обработанное, без начисления; по-настоящему
+  // новые капты начнут начисляться со следующего опроса.
+  let isBootstrap;
+  try {
+    isBootstrap = !(await hasProcessedAnyFamilyWarsCapture());
+  } catch (error) {
+    console.error("Failed to check family-wars bootstrap state:", error);
+    return;
+  }
+
+  for (const capture of captures) {
+    if (capture.status !== "finished" || capture.id == null || capture.winner == null) continue;
+    const ownFamilyId = resolveOwnFamilyId(capture);
+    if (ownFamilyId == null) continue;
+
+    const claimed = await tryClaimFamilyWarsCapture(capture.id).catch((error) => {
+      console.error(`Failed to claim family-wars capture ${capture.id}:`, error);
+      return false;
+    });
+    if (!claimed || isBootstrap) continue;
+
+    try {
+      await awardFamilyWarsCapture(guild, capture, ownFamilyId);
+    } catch (error) {
+      console.error(`Failed to process family-wars capture ${capture.id}:`, error);
+    }
+  }
+
+  if (isBootstrap) {
+    await sendLog(guild, new EmbedBuilder()
+      .setColor(0x56ccf2)
+      .setTitle("Автоначисление МП за капты: первый запуск")
+      .setDescription("Существующая история каптов из Majestic API отмечена как уже известная, без начисления баллов. Начисление начнётся с новых каптов, которые появятся после этого момента."));
+  }
 }
 
 async function getAfkMembers(guild) {
@@ -2483,6 +2623,16 @@ async function handleClientReady(readyClient) {
     });
   }, CAPT_REPLAY_SWEEP_INTERVAL_MS);
   captReplaySweep.unref?.();
+
+  syncFamilyWarsCaptures(readyClient).catch((error) => {
+    console.error("Failed to sync family-wars captures:", error);
+  });
+  const familyWarsSweep = setInterval(() => {
+    syncFamilyWarsCaptures(readyClient).catch((error) => {
+      console.error("Failed to sync family-wars captures:", error);
+    });
+  }, FAMILY_WARS_POLL_INTERVAL_MS);
+  familyWarsSweep.unref?.();
 
   // Periodically (rather than before every single interaction) pick up data changed
   // directly in the database, so manual edits still apply without a restart but without
